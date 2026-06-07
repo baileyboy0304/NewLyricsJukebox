@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5
+
+- Web UI still timed out on 1.0.4 even with `host_network: true`. Re-add the
+  `ports:` declaration (`9014/tcp`, `6056/udp`): on Home Assistant OS the host
+  firewall only opens a port that is declared in `ports:`, even for host_network
+  add-ons. Keep `host_network: true` so the UI is on the host IP and UDP keeps
+  the real source IP.
+
 ## 1.0.4
 
 - Fix web UI unreachable at `http://<host>:9014` (ERR_CONNECTION_TIMED_OUT).
