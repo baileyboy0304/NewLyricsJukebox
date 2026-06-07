@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+- Fix inaccessible web UI (sidebar ingress and direct URL): removed
+  `host_network`, which is incompatible with Home Assistant ingress. The add-on
+  now runs on the standard add-on network with `9014/tcp` (UI) and `6056/udp`
+  (RTP audio) mapped explicitly. UDP player identity comes from the RTP
+  SSRC/extension, so port-mapped UDP works without the host network.
+
 ## 1.0.1
 
 - Fix blank page under Home Assistant ingress: assets and API calls now use

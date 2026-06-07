@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.1"
+version: "1.0.2"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -8,7 +8,10 @@ arch:
   - aarch64
 startup: application
 boot: auto
-host_network: true
+# NOTE: host_network must NOT be enabled — it is incompatible with ingress
+# (the Supervisor proxy reaches the add-on over the internal hassio network).
+# Ports are mapped explicitly instead; UDP player identity comes from the RTP
+# SSRC/extension, not the source IP, so NAT'd UDP is fine.
 ingress: true
 ingress_port: 9014
 panel_icon: mdi:music-note-eighth
