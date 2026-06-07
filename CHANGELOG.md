@@ -1,0 +1,20 @@
+# Changelog
+
+## 1.0.1
+
+- Fix blank page under Home Assistant ingress: assets and API calls now use
+  relative URLs so the UI works both behind the ingress path prefix and at the
+  server root (direct `:9014`).
+
+## 1.0.0
+
+- Clean rebuild of NewLyricsJukebox (see `REBUILD_NOTES.md`).
+- `classify_source_mode()` spine: queue-based (Music Assistant metadata) vs
+  stream-based (UDP audio recognition).
+- RTP-only UDP capture with per-player demux; Shazam → ACRCloud recognition with
+  the "3 attempts before locked" cycle and persisted ACRCloud daily quota.
+- All lyrics providers kept (LRCLIB, Spotify, Musixmatch, NetEase, QQ) with
+  two-pass selection and the per-song JSON DB; per-player state (no module
+  globals).
+- Web UI on port 9014: player-select modal, now-playing, 3-line lyrics,
+  transport bar with flywheel-clock sync.
