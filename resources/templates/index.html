@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>NewLyricsJukebox</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <span class="app-title">NewLyricsJukebox</span>
+    <button id="btn-players" class="icon-btn" title="Select player">🔊</button>
+  </header>
+
+  <main class="stage">
+    <section class="now-playing">
+      <img id="np-art" class="np-art" alt="" />
+      <div class="np-text">
+        <div id="np-title" class="np-title"></div>
+        <div id="np-artist" class="np-artist"></div>
+      </div>
+    </section>
+
+    <section class="lyrics">
+      <div id="line-prev" class="line line-prev"></div>
+      <div id="line-current" class="line line-current"></div>
+      <div id="line-next" class="line line-next"></div>
+      <div id="provider" class="provider"></div>
+    </section>
+  </main>
+
+  <footer class="transport">
+    <div class="progress">
+      <span id="time-pos" class="time">0:00</span>
+      <input id="scrub" class="scrub" type="range" min="0" max="100" value="0" />
+      <span id="time-dur" class="time">0:00</span>
+    </div>
+    <div class="controls">
+      <button id="btn-prev" class="ctrl-btn">⏮</button>
+      <button id="btn-playpause" class="ctrl-btn ctrl-main">▶</button>
+      <button id="btn-next" class="ctrl-btn">⏭</button>
+    </div>
+  </footer>
+
+  <div id="player-modal" class="modal">
+    <div class="modal-card">
+      <h2>Select player</h2>
+      <div id="player-list" class="player-list"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

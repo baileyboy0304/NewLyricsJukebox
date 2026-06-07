@@ -1,0 +1,22 @@
+# NewLyricsJukebox runtime dependencies
+
+# Web server (ASGI)
+quart>=0.20.0
+hypercorn>=0.14.3
+
+# HTTP + audio
+requests>=2.31.0
+numpy>=1.26.4
+
+# Audio recognition
+shazamio>=0.8.1
+
+# Music Assistant integration
+music-assistant-client>=1.0.0
+
+# Lyrics providers
+spotipy>=2.23.0
+python-dotenv>=1.0.0
+
+# Recognition signing / HTTPS support
+cryptography>=41.0.0
