@@ -1,0 +1,73 @@
+name: "NewLyricsJukebox"
+version: "1.0.0"
+slug: newlyricsjukebox
+description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
+url: "https://github.com/baileyboy0304/newlyricsjukebox"
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+host_network: true
+ingress: true
+ingress_port: 9014
+panel_icon: mdi:music-note-eighth
+panel_title: Lyrics Jukebox
+ports:
+  9014/tcp: 9014
+  6056/udp: 6056
+ports_description:
+  9014/tcp: "Web UI"
+  6056/udp: "UDP audio input from Music Assistant"
+map:
+  - addon_config:rw
+init: false
+options:
+  music_assistant_base_url: ""
+  music_assistant_token: ""
+  music_assistant_player_id: ""
+  server_port: 9014
+  recognition_enabled: true
+  udp_listen_port: 6056
+  udp_audio_sample_rate: 16000
+  udp_jitter_buffer_ms: 60
+  lock_position_after: 3
+  capture_duration: 6.0
+  recognition_interval: 4.0
+  latency_offset: 0.0
+  acrcloud_host: ""
+  acrcloud_access_key: ""
+  acrcloud_access_secret: ""
+  acrcloud_daily_limit: 100
+  spotify_client_id: ""
+  spotify_client_secret: ""
+  log_level: "INFO"
+  players_auto_discover: true
+  players: []
+schema:
+  music_assistant_base_url: str?
+  music_assistant_token: str?
+  music_assistant_player_id: str?
+  server_port: port
+  recognition_enabled: bool
+  udp_listen_port: port
+  udp_audio_sample_rate: "int(8000,48000)"
+  udp_jitter_buffer_ms: "int(0,500)"
+  lock_position_after: "int(1,10)"
+  capture_duration: "float(1.0,15.0)"
+  recognition_interval: "float(1.0,30.0)"
+  latency_offset: "float(-5.0,5.0)"
+  acrcloud_host: str?
+  acrcloud_access_key: str?
+  acrcloud_access_secret: str?
+  acrcloud_daily_limit: "int(0,10000)"
+  spotify_client_id: str?
+  spotify_client_secret: str?
+  log_level: "list(DEBUG|INFO|WARNING|ERROR)"
+  players_auto_discover: bool
+  players:
+    - name: str
+      source_ip: str?
+      rtp_ssrc: str?
+      music_assistant_player_id: str?
+      description: str?
