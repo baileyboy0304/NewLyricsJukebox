@@ -22,7 +22,16 @@ const urlPlayer = new URLSearchParams(location.search).get('player');
 if (urlPlayer) selectedPlayer = urlPlayer;
 else selectedPlayer = localStorage.getItem('selectedPlayer') || null;
 
-function withPlayer(url) {
+// Resolve API paths against the document base so the app works both at the
+// server root and behind a Home Assistant ingress path prefix. The browser
+// resolves a relative URL against document.baseURI, which already includes the
+// ingress prefix (HA serves the page under a trailing-slash path).
+function api(path) {
+  return new URL(path, document.baseURI).toString();
+}
+
+function withPlayer(path) {
+  const url = api(path);
   if (!selectedPlayer || selectedPlayer === 'auto') return url;
   return url + (url.includes('?') ? '&' : '?') + 'player=' + encodeURIComponent(selectedPlayer);
 }
@@ -42,7 +51,7 @@ async function fetchJSON(url, options) {
 }
 
 async function pollTrack() {
-  const data = await fetchJSON(withPlayer('/current-track'));
+  const data = await fetchJSON(withPlayer('current-track'));
   if (!data || !data.title) {
     flywheel.isPlaying = false;
     return false;
@@ -69,7 +78,7 @@ async function pollTrack() {
 }
 
 async function pollLyrics() {
-  const data = await fetchJSON(withPlayer('/lyrics'));
+  const data = await fetchJSON(withPlayer('lyrics'));
   if (!data) return;
   if (data.track_id && data.track_id !== currentTrackId) return; // stale
   currentLines = data.line_synced || [];
@@ -148,7 +157,7 @@ function updatePlayPause(isPlaying) {
 // ---------- transport ----------
 
 async function transport(action, extra) {
-  await fetchJSON(withPlayer('/transport'), {
+  await fetchJSON(withPlayer('transport'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(Object.assign({ action }, extra || {})),
@@ -173,7 +182,7 @@ function wireTransport() {
 // ---------- player modal ----------
 
 async function openPlayerModal() {
-  const data = await fetchJSON('/players');
+  const data = await fetchJSON(api('players'));
   const modal = $('player-modal');
   const list = $('player-list');
   list.innerHTML = '';
@@ -229,7 +238,7 @@ function playerRow(p, isAuto, unassigned) {
 async function doRename(key, current) {
   const name = prompt('Rename player', current);
   if (name) {
-    await fetchJSON(`/players/${encodeURIComponent(key)}/rename`, {
+    await fetchJSON(api(`players/${encodeURIComponent(key)}/rename`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
