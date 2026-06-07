@@ -13,7 +13,7 @@ from typing import Dict, Optional
 from quart import Quart, jsonify, render_template, request
 
 from classify import classify_source_mode
-from config import LYRICS, PLAYERS, RESOURCES_DIR, SERVER
+from config import LYRICS, PLAYERS, RESOURCES_DIR, SERVER, VERSION
 from lyrics import LyricsData, LyricsService
 from ma_models import PlayerState
 
@@ -267,6 +267,10 @@ def create_app(controller: Controller) -> Quart:
     @app.route("/")
     async def index():
         return await render_template("index.html")
+
+    @app.route("/health")
+    async def health():
+        return jsonify({"status": "ok", "version": VERSION})
 
     @app.route("/players")
     async def players():

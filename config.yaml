@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.2"
+version: "1.0.4"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -8,20 +8,12 @@ arch:
   - aarch64
 startup: application
 boot: auto
-# NOTE: host_network must NOT be enabled — it is incompatible with ingress
-# (the Supervisor proxy reaches the add-on over the internal hassio network).
-# Ports are mapped explicitly instead; UDP player identity comes from the RTP
-# SSRC/extension, not the source IP, so NAT'd UDP is fine.
-ingress: true
-ingress_port: 9014
-panel_icon: mdi:music-note-eighth
-panel_title: Lyrics Jukebox
-ports:
-  9014/tcp: 9014
-  6056/udp: 6056
-ports_description:
-  9014/tcp: "Web UI"
-  6056/udp: "UDP audio input from Music Assistant"
+# Networking matches the original working add-on: host_network puts the web UI
+# directly on the host (http://<host>:9014) and lets the add-on receive RTP
+# audio on UDP 6056 from Music Assistant with the real source IP. (Ingress is
+# intentionally NOT used — it is incompatible with host_network unless
+# ingress_port is 0, and direct host access is the proven, simple model.)
+host_network: true
 map:
   - addon_config:rw
 init: false

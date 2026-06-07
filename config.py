@@ -23,6 +23,21 @@ except (OSError, ValueError):
     _OPTIONS = {}
 
 
+def _read_version() -> str:
+    """Read the add-on version from config.yaml (shipped in the image) so we can
+    log which build is actually running. Avoids a yaml dependency."""
+    try:
+        for line in (Path(__file__).parent / "config.yaml").read_text().splitlines():
+            if line.startswith("version:"):
+                return line.split(":", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return "unknown"
+
+
+VERSION = _read_version()
+
+
 def conf(key, default=None):
     """Resolve a config value: options.json -> env var -> default.
 

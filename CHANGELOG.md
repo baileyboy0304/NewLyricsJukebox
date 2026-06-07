@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.4
+
+- Fix web UI unreachable at `http://<host>:9014` (ERR_CONNECTION_TIMED_OUT).
+  Restored the original working network model: `host_network: true` with no
+  ingress/port-mapping. Removing host_network in 1.0.2/1.0.3 stopped exposing
+  port 9014 on the host. The UI is again reachable directly at the host IP, and
+  RTP audio arrives on UDP 6056 with the real source IP, exactly like the
+  original add-on.
+
+## 1.0.3
+
+- Log the running version at startup (`=== NewLyricsJukebox version X.Y.Z ===`)
+  and add a `/health` endpoint returning the version, so it's possible to confirm
+  which build a Home Assistant install is actually running. (Add-on `config.yaml`
+  network changes only take effect on Update/Rebuild, not a plain restart.)
+
 ## 1.0.2
 
 - Fix inaccessible web UI (sidebar ingress and direct URL): removed
