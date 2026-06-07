@@ -8,7 +8,7 @@ run.sh, and directly for development.
 import asyncio
 import logging
 
-from config import AUDIO_RECOGNITION, LOG_LEVEL, SERVER, UDP_AUDIO
+from config import AUDIO_RECOGNITION, LOG_LEVEL, SERVER, UDP_AUDIO, VERSION
 from logging_config import setup_logging
 from server import Controller, create_app
 
@@ -17,6 +17,7 @@ logger = logging.getLogger("newlyricsjukebox")
 
 async def _run():
     setup_logging(LOG_LEVEL)
+    logger.info("=== NewLyricsJukebox version %s ===", VERSION)
 
     capture = None
     if UDP_AUDIO["enabled"] and AUDIO_RECOGNITION["enabled"]:

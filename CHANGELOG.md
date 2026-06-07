@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3
+
+- Log the running version at startup (`=== NewLyricsJukebox version X.Y.Z ===`)
+  and add a `/health` endpoint returning the version, so it's possible to confirm
+  which build a Home Assistant install is actually running. (Add-on `config.yaml`
+  network changes only take effect on Update/Rebuild, not a plain restart.)
+
 ## 1.0.2
 
 - Fix inaccessible web UI (sidebar ingress and direct URL): removed
