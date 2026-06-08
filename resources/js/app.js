@@ -12,10 +12,22 @@ const IDLE_THRESHOLD = 20000;
 const flywheel = new Flywheel();
 let selectedPlayer = null;      // null = Auto
 let currentLines = [];          // [{start, text}]
+let lyricStatus = '';           // shown on the center line when no synced lyrics
 let currentTrackId = null;
+let lastActiveIdx = -2;         // for logging line changes
+let lastIsPlaying = null;
 let seekable = false;
 let durationMs = null;
 let isScrubbing = false;
+
+// ---------- console logging (compare timing with the add-on log) ----------
+// Logs use wall-clock HH:MM:SS.mmm to line up with the server's timestamps.
+function nljLog(kind, detail) {
+  const t = new Date();
+  const ts = t.toTimeString().slice(0, 8) + '.' + String(t.getMilliseconds()).padStart(3, '0');
+  // eslint-disable-next-line no-console
+  console.log(`[NLJ ${ts}] ${kind}`, detail !== undefined ? detail : '');
+}
 
 // URL ?player= pins the selection.
 const urlPlayer = new URLSearchParams(location.search).get('player');
@@ -56,12 +68,24 @@ async function pollTrack() {
     flywheel.isPlaying = false;
     return false;
   }
-  // Track changed -> reset lyrics + flywheel.
+  // Track changed -> clear stale lyrics IMMEDIATELY (metadata drives this) and
+  // reset the flywheel.
   if (data.track_id !== currentTrackId) {
     currentTrackId = data.track_id;
     currentLines = [];
+    lyricStatus = '…';            // loading until lyrics arrive
+    lastActiveIdx = -2;
     flywheel.reset();
+    nljLog('metadata', {
+      title: data.title, artist: data.artist, source: data.source,
+      position: Number((data.position || 0).toFixed(2)),
+      is_playing: data.is_playing, track_id: data.track_id,
+    });
+  } else if (data.is_playing !== lastIsPlaying) {
+    nljLog('playstate', { is_playing: data.is_playing, position: Number((data.position || 0).toFixed(2)) });
   }
+  lastIsPlaying = data.is_playing;
+
   seekable = !!data.seekable;
   durationMs = data.duration_ms;
   flywheel.setAnchor(data.position || 0, data.is_playing);
@@ -81,11 +105,27 @@ async function pollLyrics() {
   const data = await fetchJSON(withPlayer('lyrics'));
   if (!data) return;
   if (data.track_id && data.track_id !== currentTrackId) return; // stale
-  currentLines = data.line_synced || [];
-  if (!data.has_lyrics) {
-    setLines({ previous: '', current: data.is_instrumental ? '♪ Instrumental ♪' : '', next: '' });
+  const lines = data.line_synced || [];
+  const had = currentLines.length;
+  currentLines = lines;
+  if (lines.length) {
+    lyricStatus = '';
+  } else if (data.is_instrumental) {
+    lyricStatus = '♪ Instrumental ♪';
+  } else if (data.pending) {
+    lyricStatus = '…';
+  } else {
+    lyricStatus = '';            // no lyrics found -> blank (stale already cleared)
   }
   $('provider').textContent = data.provider ? `via ${data.provider}` : '';
+  // Log only when the lyric availability actually changes, not every poll.
+  if (!!had !== !!lines.length || lines.length === 0) {
+    nljLog('lyrics', {
+      provider: data.provider, lines: lines.length,
+      word_sync: data.has_word_sync, instrumental: data.is_instrumental,
+      pending: data.pending, track_id: data.track_id,
+    });
+  }
 }
 
 let lastCheck = 0;
@@ -111,7 +151,9 @@ async function loop() {
     } else {
       if (!idleSince) idleSince = Date.now();
       if (Date.now() - idleSince > IDLE_THRESHOLD) interval = IDLE_POLL_INTERVAL;
-      setLines({ previous: '', current: '', next: '' });
+      currentLines = [];
+      lyricStatus = '';
+      currentTrackId = null;
     }
   }
 }
@@ -133,6 +175,17 @@ function renderFrame(ts) {
       current: idx >= 0 ? currentLines[idx].text : '',
       next: idx + 1 < currentLines.length ? currentLines[idx + 1].text : '',
     });
+    if (idx !== lastActiveIdx) {
+      lastActiveIdx = idx;
+      nljLog('line', {
+        idx, position: Number(position.toFixed(2)),
+        text: idx >= 0 ? currentLines[idx].text : '(before first line)',
+      });
+    }
+  } else {
+    // No synced lyrics: show the status (loading / instrumental / blank). This
+    // also guarantees stale lines are cleared the moment the track changes.
+    setLines({ previous: '', current: lyricStatus, next: '' });
   }
   if (!isScrubbing && durationMs) {
     const pct = Math.min(100, (position * 1000 / durationMs) * 100);

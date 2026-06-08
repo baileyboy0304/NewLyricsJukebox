@@ -5,6 +5,7 @@ Endpoints (the brief's minimum four): /players, /current-track, /lyrics,
 when idle) and runs the flywheel clock client-side.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ class PlayerRuntime:
     track: dict = field(default_factory=dict)
     lyrics: Optional[LyricsData] = None
     lyrics_key: Optional[str] = None  # "artist|title" the lyrics belong to
+    lyrics_task: object = None        # background fetch task for the current track
+    log_key: Optional[str] = None     # last (mode,title) we logged
 
 
 class Controller:
@@ -170,6 +173,12 @@ class Controller:
 
     # -- current track ----------------------------------------------------- #
 
+    def _log_mode(self, runtime, name, mode, title, extra=""):
+        key = f"{mode}|{title}"
+        if runtime.log_key != key:
+            runtime.log_key = key
+            logger.info("current-track player=%s mode=%s title=%s%s", name, mode, title, extra)
+
     async def current_track(self, param: Optional[str]) -> dict:
         key, ma_id, stream_key, name = self._resolve(param)
         runtime = self.runtimes.setdefault(key, PlayerRuntime(key=key))
@@ -178,7 +187,19 @@ class Controller:
         if self.ma and self.ma.connected and ma_id:
             state = await self.ma.get_player_state(ma_id)
 
-        mode = classify_source_mode(state) if state else "stream"
+        if state is not None:
+            mode = classify_source_mode(state)
+        elif ma_id:
+            # Transient MA read failure on an MA-backed player — do NOT flip to
+            # recognition (that would start the respeaker recognizer in queue
+            # mode). Keep the last known track until MA responds again.
+            self._log_mode(runtime, name, runtime.mode, runtime.track.get("title"), " (ma-none)")
+            return runtime.track or {
+                "source": runtime.mode, "player": name, "title": None,
+                "artist": None, "is_playing": False, "seekable": runtime.mode == "queue",
+                "track_id": None}
+        else:
+            mode = "stream"
         runtime.mode = mode
 
         if mode == "queue" and state is not None:
@@ -217,37 +238,75 @@ class Controller:
 
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         runtime.track = track
+        self._log_mode(runtime, name, mode, track.get("title"))
         return track
 
     # -- lyrics ------------------------------------------------------------ #
+
+    def _empty_lyrics(self, track_id=None, pending=False):
+        return {
+            "track_id": track_id,
+            "has_lyrics": False,
+            "is_instrumental": False,
+            "provider": None,
+            "word_sync_provider": None,
+            "has_word_sync": False,
+            "pending": pending,
+            "lines": {"previous": "", "current": "", "next": ""},
+            "line_synced": [],
+            "word_synced": [],
+        }
+
+    async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album, duration):
+        def on_update(data):
+            if runtime.lyrics_key == lyrics_key:   # ignore if track changed
+                runtime.lyrics = data
+        try:
+            await self.lyrics_service.fetch(artist, title, album, duration, on_update=on_update)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("Lyrics fetch failed for %s - %s", artist, title)
 
     async def lyrics(self, param: Optional[str]) -> dict:
         key, _, _, _ = self._resolve(param)
         runtime = self.runtimes.get(key)
         if runtime is None or not runtime.track.get("title"):
-            return {"has_lyrics": False, "lines": {"previous": "", "current": "", "next": ""}}
+            return self._empty_lyrics()
 
         artist = runtime.track.get("artist") or ""
         title = runtime.track.get("title") or ""
+        track_id = runtime.track.get("track_id")
         lyrics_key = f"{artist}|{title}"
+
+        # New track: clear stale lyrics IMMEDIATELY and kick off a background
+        # fetch. The response never blocks on providers; polls pick up lyrics as
+        # soon as the first provider returns (see LyricsService.fetch on_update).
         if runtime.lyrics_key != lyrics_key:
-            runtime.lyrics = await self.lyrics_service.fetch(
-                artist, title,
-                album=runtime.track.get("album"),
-                duration=(runtime.track.get("duration_ms") or 0) // 1000 or None,
-            )
             runtime.lyrics_key = lyrics_key
+            runtime.lyrics = None
+            if runtime.lyrics_task and not runtime.lyrics_task.done():
+                runtime.lyrics_task.cancel()
+            runtime.lyrics_task = asyncio.create_task(self._fetch_lyrics_bg(
+                runtime, lyrics_key, artist, title,
+                runtime.track.get("album"),
+                (runtime.track.get("duration_ms") or 0) // 1000 or None,
+            ))
 
         data = runtime.lyrics
+        if data is None:
+            return self._empty_lyrics(track_id, pending=True)
+
         position = runtime.track.get("position", 0.0)
         lines = LyricsService.lines_around(data, position)
         return {
-            "track_id": runtime.track.get("track_id"),
+            "track_id": track_id,
             "has_lyrics": data.has_lyrics,
             "is_instrumental": data.is_instrumental,
             "provider": data.line_provider,
             "word_sync_provider": data.word_provider,
             "has_word_sync": data.has_word_sync,
+            "pending": False,
             "lines": lines,
             "line_synced": [{"start": s, "text": t} for s, t in data.line_synced],
             "word_synced": data.word_synced,

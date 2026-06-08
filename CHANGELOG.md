@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.9
+
+- **Lyrics now appear immediately (fixes the ~10s+ delay).** `fetch()` applied
+  results only after every provider finished, so a slow/failing provider (QQ
+  retrying a 500 for ~25s) blocked display even though Musixmatch/LRCLib had
+  lyrics in <1s. Lyrics are now fetched in the background and applied
+  incrementally — the first provider to return shows immediately, better
+  providers upgrade it.
+- **Stale lyrics cleared on track change.** The server clears lyrics the moment
+  the track changes (returns `pending`), and the browser blanks the lines as
+  soon as new metadata arrives — no more leftover lyrics from the previous song.
+- **No recognition in queue/Spotify mode.** A transient Music Assistant read no
+  longer flips an MA-backed player into stream/recognition mode (which started
+  the respeaker recognizer and contaminated the timecode with a second
+  timeline). This should fix the timecode freezing in Spotify mode.
+- **Chrome console logging** (defect aid): the browser logs `[NLJ HH:MM:SS.mmm]`
+  lines for metadata changes, play-state changes, lyric availability, and each
+  active-line change — timestamped to line up with the add-on log. The server
+  also logs `current-track player=… mode=… title=…` on each change.
+
 ## 1.0.8
 
 - Add Home Assistant **ingress**: the UI now appears in the sidebar
