@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.20
+
+- **Break the position lock on a sustained timeline shift (radio skip/rebuffer).**
+  Previously, once `POSITION LOCKED`, every later recognition was `IGNORED`
+  forever — so when a radio stream jumped (e.g. Rod Stewart "Baby Jane" leaping
+  from ~60s to ~136s and staying there), the lyrics stayed frozen on the stale
+  position. A *single* off-baseline read is still ignored (chorus confusion), but
+  `lock_position_after` consecutive reads that agree with each other on a NEW
+  timeline now break the lock and re-acquire (logged `POSITION RE-ACQUIRED
+  (sustained shift, position re-locked)`).
+
 ## 1.0.19
 
 - **Log the current synced-lyric line the server is serving** (`lyric-line

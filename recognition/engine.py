@@ -39,9 +39,15 @@ class LockTracker:
     re-bases (status ``relock``). After ``lock_after`` confirmations the position
     is *locked* and later anchors are ignored (avoids chorus-confusion jumps).
 
+    A lock is not forever: a *single* off-baseline read while locked is still
+    ignored, but ``lock_after`` consecutive reads that agree with each other on a
+    NEW timeline (e.g. a radio stream skip/rebuffer) break the lock and re-acquire
+    on the new position (status ``reacquire``) — otherwise the position stays
+    frozen while the song has moved on.
+
     ``offer`` returns a status string consumed by the engine for logging:
     ``initial`` | ``locking`` | ``locked`` | ``ignored`` | ``relock`` |
-    ``tracking`` (the last when locking is disabled).
+    ``reacquire`` | ``tracking`` (the last when locking is disabled).
     """
 
     def __init__(self, lock_after: int = 3, tolerance: float = 3.0, enabled: bool = True):
@@ -55,6 +61,8 @@ class LockTracker:
         self.confirmations = 0                  # consistent reads after the initial
         self.initialized = False
         self.result: Optional[RecognitionResult] = None
+        self._drift_anchor: Optional[float] = None  # candidate new timeline while locked
+        self._drift_count = 0
 
     @property
     def locked(self) -> bool:
@@ -78,9 +86,27 @@ class LockTracker:
             self.result = result
             return "tracking"
 
-        # Already locked: freeze position, ignore later anchors.
+        # Already locked: freeze position and ignore one-off outliers (chorus
+        # confusion). BUT a sustained, self-consistent shift off the locked
+        # timeline (a radio skip/rebuffer) must break the lock and re-acquire,
+        # or the position stays frozen while the song has moved on.
         if self.locked:
-            return "ignored"
+            if abs(anchor - self._baseline) <= self.tolerance:
+                self._drift_anchor = None   # back in sync; drop any drift streak
+                self._drift_count = 0
+                return "ignored"
+            if self._drift_anchor is not None and abs(anchor - self._drift_anchor) <= self.tolerance:
+                self._drift_count += 1
+            else:
+                self._drift_count = 1
+            self._drift_anchor = anchor
+            if self._drift_count >= self.lock_after:
+                self._baseline = anchor      # re-acquire on the new timeline
+                self._drift_anchor = None
+                self._drift_count = 0
+                self.result = result
+                return "reacquire"
+            return "ignored"                 # still treating as an outlier
 
         if abs(anchor - self._baseline) <= self.tolerance:
             self.confirmations += 1
@@ -216,7 +242,8 @@ class PlayerRecognizer:
         else:
             status = self._lock.offer(result)
             if status != "ignored":
-                self._current = result  # refine position until locked
+                # refine while converging, or jump to a re-acquired timeline
+                self._current = result
             # 'ignored' -> keep the locked position
         self._log_recognition(result, status)
         if self._on_update:
@@ -235,6 +262,8 @@ class PlayerRecognizer:
             pos = "LOCKING (%d of %d) - LOCKED" % (n, n)
         elif status == "relock":
             pos = "RE-LOCKING (outlier, position reset)"
+        elif status == "reacquire":
+            pos = "RE-ACQUIRED (sustained shift, position re-locked)"
         elif status == "tracking":
             pos = "TRACKING (lock disabled)"
         else:  # ignored
