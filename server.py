@@ -342,7 +342,8 @@ def create_app(controller: Controller) -> Quart:
 
     @app.route("/")
     async def index():
-        return await render_template("index.html")
+        # Pass the version so asset URLs can be cache-busted per release.
+        return await render_template("index.html", version=VERSION)
 
     @app.route("/health")
     async def health():
@@ -379,9 +380,13 @@ def create_app(controller: Controller) -> Quart:
         return jsonify({"ok": bool(name)})
 
     @app.after_request
-    async def no_store(response):
+    async def cache_headers(response):
         if request.path in ("/", "/current-track", "/lyrics", "/players"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.path.startswith("/static/"):
+            # Revalidate static assets so a rebuilt add-on always serves fresh
+            # JS/CSS (otherwise the browser keeps the old app.js after an update).
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     return app
