@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.0.14
+
+- Console logging: removed the noisy ~1s `poll` heartbeat. Only change-based
+  lines remain — `metadata` (track change), `lyrics` (availability), `line`
+  (active lyric line), plus `playstate` and the startup `app started` line.
+- Lowered the recognition network timeout from 20s to 10s.
+
+## 1.0.13
+
+- **Fix the multi-minute startup stall in recognition.** The first outbound
+  Shazam API call (DNS + internet) could hang for minutes right after boot — the
+  add-on connected to Music Assistant instantly (a LAN IP, no DNS) but the first
+  internet call stalled until connectivity/DNS settled. Symptom: a single
+  recognize() blocked ~5 min, then returned a result for the boot-time audio (a
+  song that had already finished) and everything caught up. Recognition calls
+  now have a 20s timeout, so a startup network hang can't block a cycle; the loop
+  retries and self-heals as soon as the network is ready. (Pairs with the 1.0.12
+  Shazam warmup and per-cycle outcome logging.)
+
+## 1.0.12
+
+- **Recognition visibility (diagnose "first boot doesn't detect").** The engine
+  now logs each recognition outcome (throttled): `Recognize <key>: no match
+  (audio level=…)`, `no audio (stream idle/too short)`, plus the existing
+  `New song …` on success. Previously only a successful match logged, so a
+  non-matching cold boot looked silent/broken. `current-track` also logs
+  `mode=stream (recognizing, stream=…)` while waiting for the first match.
+- **Faster first detection.** Shazam's core (~5s one-time init) is now warmed up
+  at startup in the background, so the first real recognition isn't delayed by it.
+- No changes to the recognition/detection logic itself — additive only.
+
 ## 1.0.11
 
 - **Per-provider enable/disable in add-on options** (`provider_spotify`,

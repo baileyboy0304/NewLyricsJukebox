@@ -59,6 +59,48 @@ def test_position_interpolates_from_offset():
     assert 31.5 < pos < 32.5
 
 
+def test_recognition_call_times_out_and_loop_continues():
+    """A hung Shazam/ACRCloud call must be abandoned (not block for minutes)."""
+    import asyncio
+    import time
+
+    import numpy as np
+
+    import recognition.engine as eng
+    from recognition.engine import PlayerRecognizer
+    from recognition.udp_capture import PlayerStream, UdpAudioCapture
+
+    async def scenario():
+        orig = eng.RECOGNIZE_TIMEOUT
+        eng.RECOGNIZE_TIMEOUT = 0.1
+        try:
+            cap = UdpAudioCapture()
+            s = PlayerStream(key="z", sample_rate=16000, channels=1)
+            s._buffer.extend((np.random.randn(16000 * 7) * 5000).astype("<i2").tobytes())
+            s.last_seen = time.time()
+            cap._streams["z"] = s
+
+            rec = PlayerRecognizer("z", cap)
+            rec._interval = 0.02
+            timed_out = {"n": 0}
+
+            async def hang(_audio):
+                timed_out["n"] += 1
+                await asyncio.sleep(5)   # far longer than the timeout
+                return None
+
+            rec._recognize_once = hang
+            rec.start()
+            # If the timeout didn't work, this wait would hang on the 5s sleep.
+            await asyncio.wait_for(asyncio.sleep(0.5), timeout=2.0)
+            await rec.stop()
+            assert timed_out["n"] >= 2   # multiple cycles ran despite the hang
+        finally:
+            eng.RECOGNIZE_TIMEOUT = orig
+
+    asyncio.run(scenario())
+
+
 def test_loop_does_not_starve_event_loop_when_no_stream():
     """Regression: a recognizer whose stream key doesn't exist must still yield
     each cycle, or it busy-loops and freezes the whole asyncio app (and the web

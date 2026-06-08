@@ -29,6 +29,9 @@ async def _run():
         )
         try:
             await capture.start()
+            # Warm up Shazam's core now so the first track is recognized fast.
+            from recognition.shazam import ShazamRecognizer
+            asyncio.create_task(ShazamRecognizer().warmup())
         except OSError as exc:
             logger.error("Could not start UDP capture: %s", exc)
             capture = None

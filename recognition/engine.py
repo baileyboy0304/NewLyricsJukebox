@@ -18,6 +18,9 @@ from recognition.shazam import ShazamRecognizer
 logger = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_FAILURES = 5
+# Safety net so a hung Shazam/ACRCloud network call can never stall a recognition
+# cycle. Shazam is normally <3s and the whole chain well under this.
+RECOGNIZE_TIMEOUT = 10.0
 
 
 class LockTracker:
@@ -90,6 +93,8 @@ class PlayerRecognizer:
         self._failures = 0
         self._paused = False
         self._current: Optional[RecognitionResult] = None
+        self._last_outcome = ""
+        self._last_outcome_at = 0.0
 
     # -- lifecycle --------------------------------------------------------- #
 
@@ -131,6 +136,17 @@ class PlayerRecognizer:
             result = await self._acrcloud.recognize(audio)
         return result
 
+    def _log_outcome(self, msg, *args):
+        """INFO-log a recognition outcome, throttled so a long run of the same
+        outcome (e.g. silence / no match) doesn't spam the log."""
+        import time as _t
+        rendered = msg % args if args else msg
+        now = _t.time()
+        if rendered != self._last_outcome or (now - self._last_outcome_at) > 30:
+            logger.info("Recognize %s: %s", self.key, rendered)
+            self._last_outcome = rendered
+            self._last_outcome_at = now
+
     async def _loop(self):
         logger.info("Recognition loop started for player %s", self.key)
         while self._running:
@@ -138,10 +154,20 @@ class PlayerRecognizer:
                 audio = await self._capture.get_audio(
                     self._capture_duration, self.key, lambda: self._running)
                 if audio is None:
+                    self._log_outcome("no audio (stream idle/too short)")
                     await self._handle_failure()
                 else:
-                    result = await self._recognize_once(audio)
+                    # Purely informational — recognition logic is unchanged.
+                    level = audio.get_max_amplitude()
+                    try:
+                        result = await asyncio.wait_for(
+                            self._recognize_once(audio), timeout=RECOGNIZE_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        self._log_outcome("timed out after %.0fs", RECOGNIZE_TIMEOUT)
+                        result = None
                     if result is None:
+                        hint = " (likely silence)" if level < 100 else ""
+                        self._log_outcome("no match (audio level=%d)%s", level, hint)
                         await self._handle_failure()
                     else:
                         self._handle_success(result)
