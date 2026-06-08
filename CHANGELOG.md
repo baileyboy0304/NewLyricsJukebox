@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.11
+
+- **Per-provider enable/disable in add-on options** (`provider_spotify`,
+  `provider_lrclib`, `provider_musixmatch`, `provider_netease`, `provider_qq`).
+  QQ defaults to OFF — its endpoint is currently returning HTTP 500 and only
+  added log noise.
+- **Fix "no console logging".** Static JS/CSS were browser-cached, so a rebuilt
+  add-on could keep serving the old `app.js` (without logging). Asset URLs are
+  now cache-busted per version (`?v=<version>`) and static responses send
+  `Cache-Control: no-cache`. The page also sets `window.NLJ_VERSION`.
+- **More useful console logs.** Added an `app started` line (shows the running
+  version) and a ~1s `poll` heartbeat logging `source`, server position vs the
+  local flywheel position, and `is_playing` — so browser/app timing can be
+  compared directly (and a stalled timecode is visible as a non-advancing
+  `server_pos`). Existing metadata / playstate / lyrics / line logs unchanged.
+
 ## 1.0.10
 
 - **Fix regression in 1.0.9 that stopped recognition entirely.** RTP streams

@@ -207,9 +207,18 @@ FEATURES = {
 # Lyrics providers (kept: LRCLIB, Spotify, Musixmatch, NetEase, QQ)
 # --------------------------------------------------------------------------- #
 
+def _provider_enabled(name: str) -> bool:
+    """Per-provider on/off. The flat HA add-on option ``provider_<name>`` takes
+    precedence; falls back to the dotted form, then defaults to enabled."""
+    val = conf(f"provider_{name}", None)
+    if val is None:
+        val = conf(f"providers.{name}.enabled", True)
+    return _as_bool(val, True)
+
+
 PROVIDERS = {
     "lrclib": {
-        "enabled": _as_bool(conf("providers.lrclib.enabled", True), True),
+        "enabled": _provider_enabled("lrclib"),
         "priority": _as_int(conf("providers.lrclib.priority", 2), 2),
         "base_url": "https://lrclib.net/api",
         "timeout": _as_int(conf("providers.lrclib.timeout", 10), 10),
@@ -217,7 +226,7 @@ PROVIDERS = {
         "cache_duration": _as_int(conf("providers.lrclib.cache_duration", 86400), 86400),
     },
     "spotify": {
-        "enabled": _as_bool(conf("providers.spotify.enabled", True), True),
+        "enabled": _provider_enabled("spotify"),
         "priority": _as_int(conf("providers.spotify.priority", 1), 1),
         "base_url": os.getenv("SPOTIFY_BASE_URL", "https://spotify-lyrics-api-azure.vercel.app"),
         "timeout": _as_int(conf("providers.spotify.timeout", 10), 10),
@@ -225,21 +234,21 @@ PROVIDERS = {
         "cache_duration": _as_int(conf("providers.spotify.cache_duration", 3600), 3600),
     },
     "musixmatch": {
-        "enabled": _as_bool(conf("providers.musixmatch.enabled", True), True),
+        "enabled": _provider_enabled("musixmatch"),
         "priority": _as_int(conf("providers.musixmatch.priority", 3), 3),
         "timeout": _as_int(conf("providers.musixmatch.timeout", 15), 15),
         "retries": _as_int(conf("providers.musixmatch.retries", 3), 3),
         "cache_duration": _as_int(conf("providers.musixmatch.cache_duration", 86400), 86400),
     },
     "netease": {
-        "enabled": _as_bool(conf("providers.netease.enabled", True), True),
+        "enabled": _provider_enabled("netease"),
         "priority": _as_int(conf("providers.netease.priority", 4), 4),
         "timeout": _as_int(conf("providers.netease.timeout", 10), 10),
         "retries": _as_int(conf("providers.netease.retries", 3), 3),
         "cache_duration": _as_int(conf("providers.netease.cache_duration", 86400), 86400),
     },
     "qq": {
-        "enabled": _as_bool(conf("providers.qq.enabled", True), True),
+        "enabled": _provider_enabled("qq"),
         "priority": _as_int(conf("providers.qq.priority", 5), 5),
         "timeout": _as_int(conf("providers.qq.timeout", 10), 10),
         "retries": _as_int(conf("providers.qq.retries", 3), 3),

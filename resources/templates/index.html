@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>NewLyricsJukebox</title>
   <link rel="manifest" href="static/manifest.json" />
-  <link rel="stylesheet" href="static/css/app.css" />
+  <link rel="stylesheet" href="static/css/app.css?v={{ version }}" />
 </head>
 <body>
   <header class="topbar">
@@ -50,6 +50,7 @@
     </div>
   </div>
 
-  <script type="module" src="static/js/app.js"></script>
+  <script>window.NLJ_VERSION = "{{ version }}";</script>
+  <script type="module" src="static/js/app.js?v={{ version }}"></script>
 </body>
 </html>

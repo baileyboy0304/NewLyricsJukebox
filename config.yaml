@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.10"
+version: "1.0.11"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -45,6 +45,11 @@ options:
   acrcloud_daily_limit: 100
   spotify_client_id: ""
   spotify_client_secret: ""
+  provider_spotify: true
+  provider_lrclib: true
+  provider_musixmatch: true
+  provider_netease: true
+  provider_qq: false
   log_level: "INFO"
   players_auto_discover: true
   players: []
@@ -67,6 +72,11 @@ schema:
   acrcloud_daily_limit: "int(0,10000)"
   spotify_client_id: str?
   spotify_client_secret: str?
+  provider_spotify: bool
+  provider_lrclib: bool
+  provider_musixmatch: bool
+  provider_netease: bool
+  provider_qq: bool
   log_level: "list(DEBUG|INFO|WARNING|ERROR)"
   players_auto_discover: bool
   players:
