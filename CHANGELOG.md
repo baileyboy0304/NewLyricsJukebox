@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.24
+
+- **Fix switching Spotify Connect → radio leaving the app stuck on the old
+  track.** When you change source, MA can leave the previous Spotify Connect
+  player lingering as "playing" with its stale track. After 1.0.23 the
+  "follow the actually-playing MA player" step latched onto that stale player and
+  recognition for the new radio never started. Now that follow is skipped when the
+  player we are actually listening to is itself on radio — recognition wins.
+- **Migrate recognition off a dead selected stream.** The respeaker reconnects
+  with a new RTP SSRC on a source change, so the previously selected stream goes
+  silent but lingers in the table. `_resolve_stream_key` now prefers the exact
+  stream only while it is live, otherwise migrates to the freshest stream for the
+  same identity — so recognition binds to the stream that actually has audio.
+
 ## 1.0.23
 
 - **Spotify Connect metadata/album art updates immediately, not after ~10s.** The

@@ -189,6 +189,57 @@ def test_selected_player_follows_playing_spotify_connect_player():
     asyncio.run(scenario())
 
 
+def test_switching_spotify_connect_to_radio_uses_recognition_not_stale_connect():
+    """Regression: after switching Spotify Connect -> radio, MA may still list the
+    old Connect player as 'playing' with the stale track. The player we actually
+    listen to is now on radio, so we must recognize, not follow the stale player."""
+    from ma_models import PlayerState
+
+    async def scenario():
+        class _MA:
+            connected = True
+            preferred_player_id = None
+
+            def list_players(self):
+                return [{"player_id": "a0505ec6", "name": "respeaker_lyrics"}]
+
+            def find_playing_player_id(self):
+                return "spotify_connect"   # stale Connect player still 'playing'
+
+            async def get_player_state(self, pid):
+                if pid == "a0505ec6":
+                    # Our resolved player is now on radio (group playing a station).
+                    return PlayerState(player_id="a0505ec6", name="respeaker_lyrics",
+                                       state="playing", title="Smooth Radio (London)",
+                                       artist="Elton John", media_type="radio")
+                if pid == "spotify_connect":
+                    # Lingering Connect session with the OLD track.
+                    return PlayerState(player_id="spotify_connect", name="Connect",
+                                       state="playing", title="I Won't Let The Sun Go Down",
+                                       artist="Nik Kershaw",
+                                       active_source_name="Spotify Connect")
+                return None
+
+        c = Controller(ma=_MA(), capture=_Capture())
+
+        class _Rec:
+            current = None
+            is_playing = False
+
+            def get_position(self):
+                return 0.0
+
+        async def fake_set_active(stream_key):
+            return _Rec()
+
+        c._set_active_recognizer = fake_set_active
+        track = await c.current_track("4efd289d")
+        assert track["source"] == "stream"
+        assert track["title"] != "I Won't Let The Sun Go Down"  # not the stale Connect track
+
+    asyncio.run(scenario())
+
+
 def test_radio_uses_recognition_not_ma_station_name():
     """For radio, MA's title is the station name — must NOT be shown; fall
     through to recognition instead."""
@@ -228,6 +279,34 @@ def test_radio_uses_recognition_not_ma_station_name():
         assert track["title"] != "Smooth Radio (London, UK)"
 
     asyncio.run(scenario())
+
+
+def test_resolve_stream_key_migrates_off_dead_selected_stream():
+    """A selected stream that has gone dead (respeaker reconnected with a new
+    SSRC) must resolve to the freshest live stream, not the dead one."""
+    class _Dead:
+        key = "73d34824"
+        ma_player_id = "a0505ec6"
+        active = False
+
+    class _Live:
+        key = "ae0d58dd"
+        ma_player_id = "a0505ec6"
+        active = True
+
+    class _Cap:
+        def get_stream(self, k):
+            return _Dead() if k == "73d34824" else None
+
+        def find_stream(self, **kw):
+            return _Live() if kw.get("ma_player_id") == "a0505ec6" else None
+
+        def first_active_stream(self):
+            return _Live()
+
+    c = Controller(ma=None, capture=_Cap())
+    # Dead selected stream + matching identity -> migrate to the live stream.
+    assert c._resolve_stream_key("73d34824", "a0505ec6") == "ae0d58dd"
 
 
 def test_only_one_recognizer_runs_at_a_time():

@@ -146,19 +146,25 @@ class Controller:
         """Map a candidate key to an actual detected RTP stream.
 
         The MA player id (e.g. 'player-3') is NOT an RTP stream key (streams are
-        keyed by SSRC), so never start a recognizer on it. Prefer an exact match,
-        then a stream whose MA identity matches, then the first active stream.
+        keyed by SSRC), so never start a recognizer on it. Prefer the exact stream
+        IF it is still live; otherwise migrate to the freshest stream for this
+        identity. The respeaker reconnects with a NEW SSRC on a source change
+        (e.g. Spotify Connect -> radio), leaving the selected stream dead but still
+        in the table for a while — binding it would get no audio.
         """
         if not self.capture:
             return None
-        if stream_key and self.capture.get_stream(stream_key):
+        s = self.capture.get_stream(stream_key) if stream_key else None
+        if s is not None and getattr(s, "active", True):
             return stream_key
         if ma_id:
-            s = self.capture.find_stream(ma_player_id=ma_id)
-            if s:
-                return s.key
-        s = self.capture.first_active_stream()
-        return s.key if s else None
+            s2 = self.capture.find_stream(ma_player_id=ma_id)
+            if s2:
+                return s2.key
+        s2 = self.capture.first_active_stream()
+        if s2:
+            return s2.key
+        return stream_key if s is not None else None
 
     async def _set_active_recognizer(self, stream_key):
         """Run AT MOST ONE recognizer — for the currently selected stream. Any
@@ -243,10 +249,14 @@ class Controller:
         #     (non-radio) metadata above, follow whichever MA player is actually
         #     playing with known non-radio media. This runs for a SELECTED player
         #     too (not just auto) so a natural Spotify Connect track change is
-        #     picked up from MA immediately instead of waiting ~10s for the next
-        #     recognition. Radio is still excluded (_is_radio), so it falls through
-        #     to recognition as before.
-        if self.ma and self.ma.connected:
+        #     picked up from MA immediately instead of waiting ~10s for recognition.
+        #
+        #     BUT skip this when the player we are ACTUALLY listening to is itself
+        #     on radio: switching Spotify Connect -> radio can leave the old Connect
+        #     player lingering in MA as "playing" with the stale track, and we must
+        #     not latch onto it — our player is on radio, so recognition wins.
+        resolved_is_radio = state is not None and self._is_radio(state)
+        if self.ma and self.ma.connected and not resolved_is_radio:
             playing_id = self.ma.find_playing_player_id()
             if playing_id and playing_id != ma_id:
                 state2 = await self.ma.get_player_state(playing_id)
