@@ -164,6 +164,10 @@ class LyricsService:
 
     # -- fetch ------------------------------------------------------------- #
 
+    async def _run_named(self, provider, artist, title, album, duration):
+        raw = await self._run_provider(provider, artist, title, album, duration)
+        return provider, raw
+
     async def _run_provider(self, provider, artist, title, album, duration):
         try:
             if asyncio.iscoroutinefunction(provider.get_lyrics):
@@ -186,11 +190,12 @@ class LyricsService:
 
         enabled = [p for p in self.providers if p.enabled]
         if FEATURES["parallel_provider_fetch"]:
-            tasks = {asyncio.create_task(self._run_provider(p, artist, title, album, duration)): p
-                     for p in enabled}
-            for task in asyncio.as_completed(tasks):
-                raw = await task
-                provider = tasks[task]
+            # Each task returns (provider, raw) so we don't rely on identifying
+            # the originating task (as_completed yields wrappers, not the tasks).
+            tasks = [asyncio.create_task(self._run_named(p, artist, title, album, duration))
+                     for p in enabled]
+            for fut in asyncio.as_completed(tasks):
+                provider, raw = await fut
                 line, meta, word = _normalize_result(raw)
                 if line or word:
                     self._write_provider(artist, title, provider.name, line, meta, word)

@@ -79,6 +79,33 @@ def test_db_round_trip():
     assert db["saved_lyrics"]["lrclib"][0] == [1.0, "hello"]
 
 
+class _FakeProvider:
+    def __init__(self, name, priority, lyrics):
+        self.name = name
+        self.priority = priority
+        self.enabled = True
+        self._lyrics = lyrics
+
+    def get_lyrics(self, artist, title, album=None, duration=None):
+        return {"lyrics": self._lyrics}
+
+
+def test_parallel_fetch_selects_best(tmp_path=None):
+    """Regression: parallel fetch must not KeyError on as_completed wrappers."""
+    import asyncio
+
+    svc = service()
+    svc.providers = [
+        _FakeProvider("spotify", 1, [(0.0, "spotify line")]),
+        _FakeProvider("qq", 5, [(0.0, "qq line")]),
+    ]
+    svc._by_name = {p.name: p for p in svc.providers}
+
+    data = asyncio.run(svc.fetch("FetchArtist", "FetchTitle"))
+    assert data.line_provider == "spotify"
+    assert data.line_synced[0][1] == "spotify line"
+
+
 def test_lines_around():
     data = LyricsData(artist="A", title="B", line_synced=[
         (0.0, "one"), (5.0, "two"), (10.0, "three"),

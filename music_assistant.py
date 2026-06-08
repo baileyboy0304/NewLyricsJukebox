@@ -88,11 +88,25 @@ class MusicAssistant:
     async def get_player_state(self, player_id: str) -> Optional[PlayerState]:
         if not self._client:
             return None
+        # get_active_queue() may return either a queue id (str) or a PlayerQueue
+        # object depending on the client version. Normalize to (queue, queue_id).
+        queue = None
+        queue_id = player_id
         try:
-            queue_id = await self._client.player_queues.get_active_queue(player_id)
+            active = await self._client.player_queues.get_active_queue(player_id)
         except Exception:  # noqa: BLE001
-            queue_id = player_id
-        queue = self._client.player_queues.get(queue_id) if queue_id else None
+            active = None
+        if active is not None:
+            if hasattr(active, "queue_id"):       # it's a PlayerQueue object
+                queue = active
+                queue_id = active.queue_id
+            else:                                  # it's an id string
+                queue_id = active
+                try:
+                    queue = self._client.player_queues.get(queue_id)
+                except Exception:  # noqa: BLE001
+                    queue = None
+
         player = self._client.players.get(queue_id) or self._client.players.get(player_id)
         if player is None:
             return None
@@ -193,7 +207,8 @@ class MusicAssistant:
         if not self._client:
             return False
         try:
-            queue_id = await self._client.player_queues.get_active_queue(player_id)
+            active = await self._client.player_queues.get_active_queue(player_id)
+            queue_id = active.queue_id if hasattr(active, "queue_id") else active
             await self._client.player_queues.seek(queue_id, int(position_ms) // 1000)
             return True
         except Exception as exc:  # noqa: BLE001
