@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.19
+
+- **Log the current synced-lyric line the server is serving** (`lyric-line
+  player=... pos=...s current='...'`), one line per transition. This makes the
+  server's notion of the current line + position directly comparable to the
+  browser/Chrome console and the recognized position, to debug sync.
+
 ## 1.0.18
 
 - **Fix the recognizer freezing after a radio station change.** Switching
