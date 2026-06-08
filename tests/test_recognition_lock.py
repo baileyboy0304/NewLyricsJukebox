@@ -68,19 +68,21 @@ def test_recognition_call_times_out_and_loop_continues():
 
     import recognition.engine as eng
     from recognition.engine import PlayerRecognizer
-    from recognition.udp_capture import PlayerStream, UdpAudioCapture
+    from recognition.udp_capture import AudioChunk
+
+    class _AlwaysAudio:
+        """Capture stub that always has a fresh chunk available."""
+        async def get_audio(self, duration, key, should_continue=None):
+            return AudioChunk(
+                data=(np.random.randn(16000) * 5000).astype(np.int16),
+                sample_rate=16000, channels=1, duration=1.0,
+                capture_start_time=time.time())
 
     async def scenario():
         orig = eng.RECOGNIZE_TIMEOUT
         eng.RECOGNIZE_TIMEOUT = 0.1
         try:
-            cap = UdpAudioCapture()
-            s = PlayerStream(key="z", sample_rate=16000, channels=1)
-            s._buffer.extend((np.random.randn(16000 * 7) * 5000).astype("<i2").tobytes())
-            s.last_seen = time.time()
-            cap._streams["z"] = s
-
-            rec = PlayerRecognizer("z", cap)
+            rec = PlayerRecognizer("z", _AlwaysAudio())
             rec._interval = 0.02
             timed_out = {"n": 0}
 

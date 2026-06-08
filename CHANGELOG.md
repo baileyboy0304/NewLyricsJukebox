@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.16
+
+- **Stop piling up recognizers (the "bombarding"/jumping/"continues after pause"
+  bugs).** The respeaker reconnects with a new RTP SSRC each time, and every new
+  stream started a NEW recognizer while old ones kept running — many recognizers
+  hammered Shazam in parallel, got rate-limited (`timed out after 10s`), and old
+  stale results popped up out of order. Now AT MOST ONE recognizer runs (for the
+  selected stream); switching streams or entering metadata mode stops the rest.
+- **Never recognize stale audio.** `get_audio` now requires a full window of
+  FRESH audio since the last read, so a dead/paused stream stops recognizing the
+  same buffered clip (it returns no audio → the recognizer idles → is stopped).
+- **Faster updates for grouped / Spotify Connect (the 7–8s lag).** In Auto mode,
+  when the resolved player has no metadata, follow whichever MA player is
+  actually playing (handles RESPEAKERGROUP / external sources), so MA metadata is
+  used immediately instead of slow recognition.
+
 ## 1.0.15
 
 - **Metadata-first: instant track updates (fixes the ~20s lag).** Music Assistant
