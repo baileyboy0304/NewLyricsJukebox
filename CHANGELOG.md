@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.0.22
+
+- **A single rogue recognition no longer disturbs the lock or the lyrics.**
+  Previously, one bad offset *while converging* (e.g. Wham! "Everything She Wants"
+  reading 53.2s then a rogue 38.3s) reset the baseline and jumped the served
+  position backwards, restarting the whole lock. Now a single off-baseline read —
+  whether converging or locked — is `held` (`POSITION OUTLIER (held, awaiting
+  confirmation)`): it doesn't move the position or break the lock streak. Only
+  `relock_position_after` reads that agree with *each other* on a new timeline
+  count as a real shift and re-base. So `53.2 → 38.3(rogue) → 65.2` now continues
+  the lock as steps 1→2 instead of thrashing.
+
+## 1.0.21
+
+- **Configurable re-acquire threshold (`relock_position_after`, default 2).** The
+  number of consecutive agreeing recognitions on a new timeline needed to break
+  the lock and re-acquire is now its own add-on option, separate from
+  `lock_position_after`. At the default of 2 (~12s at a 6s recognition cadence) a
+  radio skip auto-corrects faster than the initial lock requires.
+
+## 1.0.20
+
+- **Break the position lock on a sustained timeline shift (radio skip/rebuffer).**
+  Previously, once `POSITION LOCKED`, every later recognition was `IGNORED`
+  forever — so when a radio stream jumped (e.g. Rod Stewart "Baby Jane" leaping
+  from ~60s to ~136s and staying there), the lyrics stayed frozen on the stale
+  position. A *single* off-baseline read is still ignored (chorus confusion), but
+  `lock_position_after` consecutive reads that agree with each other on a NEW
+  timeline now break the lock and re-acquire (logged `POSITION RE-ACQUIRED
+  (sustained shift, position re-locked)`).
+
+## 1.0.19
+
+- **Log the current synced-lyric line the server is serving** (`lyric-line
+  player=... pos=...s current='...'`), one line per transition. This makes the
+  server's notion of the current line + position directly comparable to the
+  browser/Chrome console and the recognized position, to debug sync.
+
 ## 1.0.18
 
 - **Fix the recognizer freezing after a radio station change.** Switching

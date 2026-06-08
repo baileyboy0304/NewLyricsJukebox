@@ -128,6 +128,7 @@ UDP_AUDIO = {
     "jitter_buffer_ms": _as_int(conf("udp_jitter_buffer_ms", 60), 60),
     "lock_position": _as_bool(conf("lock_position", True), True),
     "lock_position_after": _as_int(conf("lock_position_after", 3), 3),
+    "relock_position_after": _as_int(conf("relock_position_after", 2), 2),
     "lock_consensus_tolerance": _as_float(conf("lock_consensus_tolerance", 3.0), 3.0),
 }
 

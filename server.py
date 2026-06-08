@@ -31,6 +31,7 @@ class PlayerRuntime:
     lyrics_key: Optional[str] = None  # "artist|title" the lyrics belong to
     lyrics_task: object = None        # background fetch task for the current track
     log_key: Optional[str] = None     # last (mode,title) we logged
+    log_line: Optional[str] = None    # last current-lyric line we logged
 
 
 class Controller:
@@ -314,8 +315,16 @@ class Controller:
         except Exception:  # noqa: BLE001
             logger.exception("Lyrics fetch failed for %s - %s", artist, title)
 
+    def _log_line(self, runtime, name, position, line):
+        """Log the current synced-lyric line the server is serving, so it can be
+        compared against what the browser is actually displaying (and against the
+        recognized position). One line per transition."""
+        if runtime.log_line != line:
+            runtime.log_line = line
+            logger.info("lyric-line player=%s pos=%.1fs current=%r", name, position, line)
+
     async def lyrics(self, param: Optional[str]) -> dict:
-        key, _, _, _ = self._resolve(param)
+        key, _, _, name = self._resolve(param)
         runtime = self.runtimes.get(key)
         if runtime is None or not runtime.track.get("title"):
             return self._empty_lyrics()
@@ -345,6 +354,7 @@ class Controller:
 
         position = runtime.track.get("position", 0.0)
         lines = LyricsService.lines_around(data, position)
+        self._log_line(runtime, name, position, lines.get("current", ""))
         return {
             "track_id": track_id,
             "has_lyrics": data.has_lyrics,
