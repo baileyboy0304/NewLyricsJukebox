@@ -281,6 +281,71 @@ def test_radio_uses_recognition_not_ma_station_name():
     asyncio.run(scenario())
 
 
+def test_spotify_connect_to_radio_stale_key_recovers_to_recognition():
+    """The reported lockup: selected key is a stale SSRC (respeaker reconnected),
+    MA still lists the old Connect player as 'playing'. We must re-point at the
+    live stream (now on radio) and recognize, not follow the stale Connect track."""
+    from ma_models import PlayerState
+
+    class _LiveRadio:
+        key = "0369d034"            # the fresh stream now carrying radio audio
+        ma_player_id = "respeaker"
+        name = "respeaker_lyrics"
+        active = True
+
+    class _Cap:
+        def get_stream(self, k):
+            return None             # selected SSRC 73d34824 has been pruned (stale)
+
+        def find_stream(self, **kw):
+            return _LiveRadio() if kw.get("ma_player_id") == "respeaker" else None
+
+        def first_active_stream(self):
+            return _LiveRadio()
+
+    async def scenario():
+        class _MA:
+            connected = True
+            preferred_player_id = None
+
+            def list_players(self):
+                return [{"player_id": "respeaker", "name": "respeaker_lyrics"}]
+
+            def find_playing_player_id(self):
+                return "spotify_connect"   # lingering Connect player, still 'playing'
+
+            async def get_player_state(self, pid):
+                if pid == "respeaker":     # the live audio source is now radio
+                    return PlayerState(player_id="respeaker", name="respeaker_lyrics",
+                                       state="playing", title="Smooth Radio",
+                                       artist="Elton John", media_type="radio")
+                if pid == "spotify_connect":
+                    return PlayerState(player_id="spotify_connect", name="Connect",
+                                       state="playing", title="The Best of My Love",
+                                       artist="Eagles",
+                                       active_source_name="Spotify Connect")
+                return None            # the stale selected key resolves to nothing
+
+        c = Controller(ma=_MA(), capture=_Cap())
+
+        class _Rec:
+            current = None
+            is_playing = False
+
+            def get_position(self):
+                return 0.0
+
+        async def fake_set_active(stream_key):
+            return _Rec()
+
+        c._set_active_recognizer = fake_set_active
+        track = await c.current_track("73d34824")   # stale selected SSRC
+        assert track["source"] == "stream"
+        assert track["title"] != "The Best of My Love"   # not the stale Connect track
+
+    asyncio.run(scenario())
+
+
 def test_resolve_stream_key_migrates_off_dead_selected_stream():
     """A selected stream that has gone dead (respeaker reconnected with a new
     SSRC) must resolve to the freshest live stream, not the dead one."""
