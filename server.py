@@ -189,15 +189,14 @@ class Controller:
 
         if state is not None:
             mode = classify_source_mode(state)
-        elif ma_id:
-            # Transient MA read failure on an MA-backed player — do NOT flip to
-            # recognition (that would start the respeaker recognizer in queue
-            # mode). Keep the last known track until MA responds again.
-            self._log_mode(runtime, name, runtime.mode, runtime.track.get("title"), " (ma-none)")
-            return runtime.track or {
-                "source": runtime.mode, "player": name, "title": None,
-                "artist": None, "is_playing": False, "seekable": runtime.mode == "queue",
-                "track_id": None}
+        elif runtime.track.get("source") == "queue" and runtime.track.get("title"):
+            # This player was ALREADY working in queue mode and MA just returned
+            # nothing — treat it as a transient blip and keep the last known
+            # track rather than flipping to recognition. (Only applies once a
+            # real queue state has been seen; a never-seen player / RTP stream
+            # falls through to stream mode below so recognition can start.)
+            self._log_mode(runtime, name, "queue", runtime.track.get("title"), " (ma-none)")
+            return runtime.track
         else:
             mode = "stream"
         runtime.mode = mode
