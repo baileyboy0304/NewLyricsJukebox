@@ -193,6 +193,12 @@ class Controller:
             runtime.log_key = key
             logger.info("current-track player=%s mode=%s title=%s%s", name, mode, title, extra)
 
+    @staticmethod
+    def _is_radio(state: PlayerState) -> bool:
+        # For radio, MA's "title" is the STATION name (e.g. "Smooth Radio"), not
+        # the song — so we must recognize the audio instead of trusting it.
+        return (getattr(state, "media_type", "") or "").lower() == "radio"
+
     def _ma_track(self, state: PlayerState, name: str) -> dict:
         mode = classify_source_mode(state)
         track = {
@@ -220,9 +226,10 @@ class Controller:
         if self.ma and self.ma.connected and ma_id:
             state = await self.ma.get_player_state(ma_id)
 
-        # 1) METADATA-FIRST: if MA knows the track (it does even for Spotify
-        #    Connect), use it immediately.
-        if state is not None and state.title:
+        # 1) METADATA-FIRST: if MA knows the real track (queue or Spotify
+        #    Connect), use it immediately. Radio is excluded — MA's title there is
+        #    the station name, so radio falls through to recognition.
+        if state is not None and state.title and not self._is_radio(state):
             track = self._ma_track(state, name)
             runtime.mode = track["source"]
             runtime.track = track
@@ -232,12 +239,12 @@ class Controller:
 
         # 1b) Auto mode + grouped/external players: the resolved player may not be
         #     the one MA shows the track on (e.g. a group coordinator). Follow
-        #     whichever MA player is actually playing with known media.
+        #     whichever MA player is actually playing with known (non-radio) media.
         if is_auto and self.ma and self.ma.connected:
             playing_id = self.ma.find_playing_player_id()
             if playing_id and playing_id != ma_id:
                 state2 = await self.ma.get_player_state(playing_id)
-                if state2 is not None and state2.title:
+                if state2 is not None and state2.title and not self._is_radio(state2):
                     track = self._ma_track(state2, state2.name or name)
                     runtime.mode = track["source"]
                     runtime.track = track
