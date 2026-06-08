@@ -35,20 +35,20 @@ class LockTracker:
     across captures of the same song on the same timeline. The first read of a
     new song is *accepted* immediately (status ``initial``) and becomes the
     baseline. Each later read within ``tolerance`` of the baseline counts as a
-    confirmation and refines the baseline; an outlier resets the count and
-    re-bases (status ``relock``). After ``lock_after`` confirmations the position
-    is *locked* and later anchors are ignored (avoids chorus-confusion jumps).
+    confirmation and refines the baseline. After ``lock_after`` confirmations the
+    position is *locked* and in-sync anchors are ignored.
 
-    A lock is not forever: a *single* off-baseline read while locked is still
-    ignored, but ``relock_after`` consecutive reads that agree with each other on
-    a NEW timeline (e.g. a radio stream skip/rebuffer) break the lock and
-    re-acquire on the new position (status ``reacquire``) — otherwise the position
-    stays frozen while the song has moved on. ``relock_after`` is separate from
+    A single off-baseline read — whether converging or locked — is treated as a
+    rogue (status ``outlier``): it does NOT move the served position or disturb
+    the lock streak. Only ``relock_after`` reads that agree with EACH OTHER on a
+    NEW timeline are a real shift (e.g. a radio skip/rebuffer); they then re-base —
+    restarting the lock streak while converging (status ``relock``) or breaking a
+    lock to re-acquire (status ``reacquire``). ``relock_after`` is separate from
     ``lock_after`` so re-acquisition can be quicker than the initial lock.
 
     ``offer`` returns a status string consumed by the engine for logging:
-    ``initial`` | ``locking`` | ``locked`` | ``ignored`` | ``relock`` |
-    ``reacquire`` | ``tracking`` (the last when locking is disabled).
+    ``initial`` | ``locking`` | ``locked`` | ``ignored`` | ``outlier`` |
+    ``relock`` | ``reacquire`` | ``tracking`` (the last when locking is disabled).
     """
 
     def __init__(self, lock_after: int = 3, tolerance: float = 3.0,
@@ -89,39 +89,37 @@ class LockTracker:
             self.result = result
             return "tracking"
 
-        # Already locked: freeze position and ignore one-off outliers (chorus
-        # confusion). BUT a sustained, self-consistent shift off the locked
-        # timeline (a radio skip/rebuffer) must break the lock and re-acquire,
-        # or the position stays frozen while the song has moved on.
-        if self.locked:
-            if abs(anchor - self._baseline) <= self.tolerance:
-                self._drift_anchor = None   # back in sync; drop any drift streak
-                self._drift_count = 0
-                return "ignored"
-            if self._drift_anchor is not None and abs(anchor - self._drift_anchor) <= self.tolerance:
-                self._drift_count += 1
-            else:
-                self._drift_count = 1
-            self._drift_anchor = anchor
-            if self._drift_count >= self.relock_after:
-                self._baseline = anchor      # re-acquire on the new timeline
-                self._drift_anchor = None
-                self._drift_count = 0
-                self.result = result
-                return "reacquire"
-            return "ignored"                 # still treating as an outlier
-
+        # In sync with the established baseline. This is the only path that
+        # moves the served position (refine while converging; frozen once locked).
         if abs(anchor - self._baseline) <= self.tolerance:
+            self._drift_anchor = None   # in sync -> drop any pending drift streak
+            self._drift_count = 0
+            if self.locked:
+                return "ignored"
             self.confirmations += 1
-            self._baseline = anchor   # refine toward the converging timeline
+            self._baseline = anchor
             self.result = result
             return "locked" if self.locked else "locking"
 
-        # Outlier -> drop the streak and re-base on this read.
-        self._baseline = anchor
-        self.confirmations = 0
-        self.result = result
-        return "relock"
+        # Off baseline. A SINGLE rogue read (chorus confusion, bad match) must not
+        # move the position or disturb the lock streak — hold it and wait. Only
+        # ``relock_after`` reads that agree with EACH OTHER on a new timeline are a
+        # real shift (radio skip), at which point we re-base on it.
+        if self._drift_anchor is not None and abs(anchor - self._drift_anchor) <= self.tolerance:
+            self._drift_count += 1
+        else:
+            self._drift_count = 1
+        self._drift_anchor = anchor
+        if self._drift_count >= self.relock_after:
+            self._baseline = anchor          # confirmed new timeline -> re-base
+            self._drift_anchor = None
+            self._drift_count = 0
+            self.result = result
+            if self.locked:
+                return "reacquire"
+            self.confirmations = 1           # restart the lock streak on it
+            return "relock"
+        return "outlier"                     # held, position unchanged
 
 
 class PlayerRecognizer:
@@ -245,10 +243,10 @@ class PlayerRecognizer:
                         result.artist, result.title, result.get_current_position())
         else:
             status = self._lock.offer(result)
-            if status != "ignored":
-                # refine while converging, or jump to a re-acquired timeline
+            if status not in ("ignored", "outlier"):
+                # refine while converging, or jump to a re-acquired timeline.
+                # 'ignored'/'outlier' -> hold the current position unchanged.
                 self._current = result
-            # 'ignored' -> keep the locked position
         self._log_recognition(result, status)
         if self._on_update:
             self._on_update(self)
@@ -264,8 +262,10 @@ class PlayerRecognizer:
             pos = "LOCKING (%d of %d)" % (self._lock.confirmations, n)
         elif status == "locked":
             pos = "LOCKING (%d of %d) - LOCKED" % (n, n)
+        elif status == "outlier":
+            pos = "OUTLIER (held, awaiting confirmation)"
         elif status == "relock":
-            pos = "RE-LOCKING (outlier, position reset)"
+            pos = "RE-LOCKING (new timeline confirmed, streak restarted)"
         elif status == "reacquire":
             pos = "RE-ACQUIRED (sustained shift, position re-locked)"
         elif status == "tracking":

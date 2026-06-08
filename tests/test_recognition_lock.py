@@ -24,34 +24,36 @@ def test_locks_after_initial_plus_three_confirmations():
     assert lt.locked is True
 
 
-def test_outlier_resets_streak():
-    lt = LockTracker(lock_after=3, tolerance=3.0)
-    lt.offer(make(10, 0))                    # initial, anchor 10
-    assert lt.offer(make(15, 5)) == "locking"   # anchor 10 -> confirmation 1
-    assert lt.offer(make(50, 5)) == "relock"    # anchor 45 -> outlier, reset
-    assert lt.locked is False
-    assert lt.confirmations == 0
+def test_single_outlier_while_locking_is_held():
+    """The bug from the Wham! log: one rogue read while converging must NOT reset
+    the streak or move the position; the next in-timeline read keeps locking."""
+    lt = LockTracker(lock_after=3, tolerance=3.0, relock_after=2)
+    assert lt.offer(make(10, 0)) == "initial"    # baseline anchor 10
+    assert lt.offer(make(16, 6)) == "locking"    # anchor 10, confirmation 1
+    assert lt.offer(make(50, 12)) == "outlier"   # rogue (anchor 38) -> held
+    assert lt.confirmations == 1                 # streak preserved, position held
+    assert lt.offer(make(28, 18)) == "locking"   # anchor 10, confirmation 2
+    assert lt.confirmations == 2
 
 
-def test_ignores_after_locked():
-    lt = LockTracker(lock_after=3, tolerance=3.0)
-    lt.offer(make(10, 0))
-    lt.offer(make(15, 5))
-    lt.offer(make(20, 10))
-    lt.offer(make(25, 15))
-    assert lt.locked
-    # A wildly different anchor after lock is ignored, not applied.
-    assert lt.offer(make(100, 0)) == "ignored"
-    assert lt.locked
+def test_sustained_shift_while_locking_rebases():
+    """Two agreeing off-baseline reads while converging ARE a real shift."""
+    lt = LockTracker(lock_after=3, tolerance=3.0, relock_after=2)
+    lt.offer(make(10, 0))                        # initial, anchor 10
+    lt.offer(make(16, 6))                         # locking 1, anchor 10
+    assert lt.offer(make(50, 6)) == "outlier"     # anchor 44, drift 1 (held)
+    assert lt.offer(make(56, 12)) == "relock"     # anchor 44, drift 2 -> re-base
+    assert lt.confirmations == 1                  # streak restarts on new timeline
 
 
-def test_single_outlier_after_lock_stays_ignored():
-    """A one-off bad match (chorus confusion) must NOT break the lock."""
-    lt = LockTracker(lock_after=3, tolerance=3.0)
+def test_single_outlier_after_lock_is_held():
+    """A one-off bad match (chorus confusion) must NOT break the lock or move
+    the position."""
+    lt = LockTracker(lock_after=3, tolerance=3.0, relock_after=2)
     for off, cs in [(10, 0), (15, 5), (20, 10), (25, 15)]:
         lt.offer(make(off, cs))               # locked on anchor 10
-    assert lt.offer(make(99, 0)) == "ignored"  # outlier (anchor 99), drift 1
-    assert lt.offer(make(35, 25)) == "ignored"  # back on anchor 10 -> drift reset
+    assert lt.offer(make(99, 0)) == "outlier"   # rogue (anchor 99) -> held
+    assert lt.offer(make(35, 25)) == "ignored"  # back on anchor 10 -> in sync
     assert lt.locked
 
 
@@ -63,7 +65,7 @@ def test_sustained_shift_breaks_lock_and_reacquires():
     for off, cs in [(10, 0), (15, 5), (20, 10), (25, 15)]:
         lt.offer(make(off, cs))               # locked on anchor 10
     # New timeline: anchor = offset - capture_start = constant 50.
-    assert lt.offer(make(70, 20)) == "ignored"    # drift 1 of 2
+    assert lt.offer(make(70, 20)) == "outlier"    # drift 1 of 2 (held)
     assert lt.offer(make(76, 26)) == "reacquire"  # drift 2 -> re-acquire
     assert lt.locked
     assert lt.offer(make(82, 32)) == "ignored"    # in sync on the new timeline
@@ -74,8 +76,8 @@ def test_relock_after_threshold_is_independent():
     lt = LockTracker(lock_after=3, tolerance=3.0, relock_after=3)
     for off, cs in [(10, 0), (15, 5), (20, 10), (25, 15)]:
         lt.offer(make(off, cs))
-    assert lt.offer(make(70, 20)) == "ignored"    # drift 1 of 3
-    assert lt.offer(make(76, 26)) == "ignored"    # drift 2 of 3
+    assert lt.offer(make(70, 20)) == "outlier"    # drift 1 of 3 (held)
+    assert lt.offer(make(76, 26)) == "outlier"    # drift 2 of 3 (held)
     assert lt.offer(make(82, 32)) == "reacquire"  # drift 3 -> re-acquire
 
 

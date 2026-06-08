@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.22
+
+- **A single rogue recognition no longer disturbs the lock or the lyrics.**
+  Previously, one bad offset *while converging* (e.g. Wham! "Everything She Wants"
+  reading 53.2s then a rogue 38.3s) reset the baseline and jumped the served
+  position backwards, restarting the whole lock. Now a single off-baseline read —
+  whether converging or locked — is `held` (`POSITION OUTLIER (held, awaiting
+  confirmation)`): it doesn't move the position or break the lock streak. Only
+  `relock_position_after` reads that agree with *each other* on a new timeline
+  count as a real shift and re-base. So `53.2 → 38.3(rogue) → 65.2` now continues
+  the lock as steps 1→2 instead of thrashing.
+
 ## 1.0.21
 
 - **Configurable re-acquire threshold (`relock_position_after`, default 2).** The
