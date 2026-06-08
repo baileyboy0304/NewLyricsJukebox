@@ -220,7 +220,6 @@ class Controller:
 
     async def current_track(self, param: Optional[str]) -> dict:
         key, ma_id, stream_key, name = self._resolve(param)
-        is_auto = not param or param == "auto"
         runtime = self.runtimes.setdefault(key, PlayerRuntime(key=key))
 
         state: Optional[PlayerState] = None
@@ -238,10 +237,16 @@ class Controller:
             self._log_mode(runtime, name, track["source"], track["title"])
             return track
 
-        # 1b) Auto mode + grouped/external players: the resolved player may not be
-        #     the one MA shows the track on (e.g. a group coordinator). Follow
-        #     whichever MA player is actually playing with known (non-radio) media.
-        if is_auto and self.ma and self.ma.connected:
+        # 1b) Grouped / external (Spotify Connect) players: the resolved player may
+        #     not be the one MA shows the track on (e.g. a group coordinator or the
+        #     Connect source player). When the resolved player gave us no usable
+        #     (non-radio) metadata above, follow whichever MA player is actually
+        #     playing with known non-radio media. This runs for a SELECTED player
+        #     too (not just auto) so a natural Spotify Connect track change is
+        #     picked up from MA immediately instead of waiting ~10s for the next
+        #     recognition. Radio is still excluded (_is_radio), so it falls through
+        #     to recognition as before.
+        if self.ma and self.ma.connected:
             playing_id = self.ma.find_playing_player_id()
             if playing_id and playing_id != ma_id:
                 state2 = await self.ma.get_player_state(playing_id)
