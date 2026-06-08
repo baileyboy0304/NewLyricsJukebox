@@ -85,6 +85,20 @@ class MusicAssistant:
             })
         return out
 
+    def find_playing_player_id(self) -> Optional[str]:
+        """Return the id of a player currently playing with known media. Handles
+        grouped / external (Spotify Connect) setups where the player our RTP
+        stream resolves to isn't the one MA shows the track on."""
+        if not self._client:
+            return None
+        for player in getattr(self._client.players, "players", []):
+            if _state_str(getattr(player, "playback_state", None)) != "playing":
+                continue
+            media = getattr(player, "current_media", None)
+            if media is not None and getattr(media, "title", None):
+                return player.player_id
+        return None
+
     async def get_player_state(self, player_id: str) -> Optional[PlayerState]:
         if not self._client:
             return None

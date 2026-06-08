@@ -159,7 +159,15 @@ class Controller:
         s = self.capture.first_active_stream()
         return s.key if s else None
 
-    def _ensure_recognizer(self, stream_key: str):
+    async def _set_active_recognizer(self, stream_key):
+        """Run AT MOST ONE recognizer — for the currently selected stream. Any
+        recognizer for a different (often stale, new-SSRC) stream is stopped, so
+        we don't pile up recognizers all hammering Shazam in parallel."""
+        for key in list(self.recognizers):
+            if key != stream_key:
+                rec = self.recognizers.pop(key)
+                await rec.stop()
+                logger.info("Stopped recognizer for stream %s", key)
         if not stream_key or not self.capture:
             return None
         rec = self.recognizers.get(stream_key)
@@ -171,6 +179,12 @@ class Controller:
             logger.info("Started recognizer for stream %s", stream_key)
         return rec
 
+    async def _stop_all_recognizers(self):
+        for key in list(self.recognizers):
+            rec = self.recognizers.pop(key)
+            await rec.stop()
+            logger.info("Stopped recognizer for stream %s", key)
+
     # -- current track ----------------------------------------------------- #
 
     def _log_mode(self, runtime, name, mode, title, extra=""):
@@ -179,37 +193,57 @@ class Controller:
             runtime.log_key = key
             logger.info("current-track player=%s mode=%s title=%s%s", name, mode, title, extra)
 
+    def _ma_track(self, state: PlayerState, name: str) -> dict:
+        mode = classify_source_mode(state)
+        track = {
+            "source": mode,
+            "from_ma": True,
+            "player": name,
+            "title": state.title,
+            "artist": state.artist,
+            "album": state.album,
+            "album_art_url": state.image_url,
+            "position": state.position,
+            "duration_ms": state.duration_ms,
+            "is_playing": state.is_playing,
+            "seekable": mode == "queue",
+        }
+        track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
+        return track
+
     async def current_track(self, param: Optional[str]) -> dict:
         key, ma_id, stream_key, name = self._resolve(param)
+        is_auto = not param or param == "auto"
         runtime = self.runtimes.setdefault(key, PlayerRuntime(key=key))
 
         state: Optional[PlayerState] = None
         if self.ma and self.ma.connected and ma_id:
             state = await self.ma.get_player_state(ma_id)
 
-        # 1) METADATA-FIRST. If Music Assistant knows the track (it does even for
-        #    Spotify Connect / external sources), use it immediately — it's fast
-        #    and accurate. classify only decides whether seeking is possible.
+        # 1) METADATA-FIRST: if MA knows the track (it does even for Spotify
+        #    Connect), use it immediately.
         if state is not None and state.title:
-            mode = classify_source_mode(state)
-            runtime.mode = mode
-            track = {
-                "source": mode,
-                "from_ma": True,
-                "player": name,
-                "title": state.title,
-                "artist": state.artist,
-                "album": state.album,
-                "album_art_url": state.image_url,
-                "position": state.position,
-                "duration_ms": state.duration_ms,
-                "is_playing": state.is_playing,
-                "seekable": mode == "queue",
-            }
-            track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
+            track = self._ma_track(state, name)
+            runtime.mode = track["source"]
             runtime.track = track
-            self._log_mode(runtime, name, mode, track["title"])
+            await self._stop_all_recognizers()      # MA describes it; no recognition
+            self._log_mode(runtime, name, track["source"], track["title"])
             return track
+
+        # 1b) Auto mode + grouped/external players: the resolved player may not be
+        #     the one MA shows the track on (e.g. a group coordinator). Follow
+        #     whichever MA player is actually playing with known media.
+        if is_auto and self.ma and self.ma.connected:
+            playing_id = self.ma.find_playing_player_id()
+            if playing_id and playing_id != ma_id:
+                state2 = await self.ma.get_player_state(playing_id)
+                if state2 is not None and state2.title:
+                    track = self._ma_track(state2, state2.name or name)
+                    runtime.mode = track["source"]
+                    runtime.track = track
+                    await self._stop_all_recognizers()
+                    self._log_mode(runtime, track["player"], track["source"], track["title"])
+                    return track
 
         # 2) Transient MA read failure (None) on a player that was just showing MA
         #    metadata — keep the last track rather than flipping to recognition.
@@ -217,11 +251,11 @@ class Controller:
             self._log_mode(runtime, name, runtime.mode, runtime.track.get("title"), " (ma-none)")
             return runtime.track
 
-        # 3) FALLBACK: recognition, for streams MA can't describe (e.g. radio
-        #    with no now-playing metadata).
+        # 3) FALLBACK: recognition, for streams MA can't describe (e.g. radio with
+        #    no now-playing metadata). Exactly one recognizer runs at a time.
         runtime.mode = "stream"
         stream_key = self._resolve_stream_key(stream_key, ma_id)
-        rec = self._ensure_recognizer(stream_key) if stream_key else None
+        rec = await self._set_active_recognizer(stream_key)
         result = rec.current if rec else None
         if result is None:
             self._log_mode(runtime, name, "stream", None,

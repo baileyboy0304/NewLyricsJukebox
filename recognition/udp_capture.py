@@ -161,6 +161,8 @@ class PlayerStream:
     _expected_seq: Optional[int] = None
     _buffer: bytearray = field(default_factory=bytearray)
     _max_bytes: int = 0
+    _total_received: int = 0
+    _last_read_total: int = 0
     _event: asyncio.Event = field(default_factory=asyncio.Event)
 
     def __post_init__(self):
@@ -192,6 +194,7 @@ class PlayerStream:
         self._expected_seq = (pkt.sequence + 1) & 0xFFFF
 
         self._buffer.extend(pkt.payload)
+        self._total_received += len(pkt.payload)
         if len(self._buffer) > self._max_bytes:
             del self._buffer[:len(self._buffer) - self._max_bytes]
         self.packet_count += 1
@@ -201,7 +204,11 @@ class PlayerStream:
     async def get_audio(self, duration: float, should_continue) -> Optional[AudioChunk]:
         needed = int(duration * self.sample_rate * self.frame_size)
         while should_continue():
-            if len(self._buffer) >= needed:
+            # Require a FULL window of FRESH audio since the last read — never
+            # re-recognize the same stale buffer (which made dead/paused streams
+            # keep "recognizing" the same clip forever).
+            new_bytes = self._total_received - self._last_read_total
+            if new_bytes >= needed and len(self._buffer) >= needed:
                 break
             self._event.clear()
             try:
@@ -214,6 +221,7 @@ class PlayerStream:
         else:
             return None
 
+        self._last_read_total = self._total_received
         audio_bytes = bytes(self._buffer[-needed:])
         data = np.frombuffer(audio_bytes, dtype=np.int16)
         if self.channels > 1:

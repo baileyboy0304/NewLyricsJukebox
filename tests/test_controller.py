@@ -63,6 +63,9 @@ class _MANoPlayers:
     def list_players(self):
         return []
 
+    def find_playing_player_id(self):
+        return None
+
     async def get_player_state(self, pid):
         return None
 
@@ -80,7 +83,10 @@ def test_rtp_stream_enters_stream_mode_not_stuck_in_queue():
             def get_position(self):
                 return 0.0
 
-        c._ensure_recognizer = lambda key: _Rec()
+        async def _fake_set_active(stream_key):
+            return _Rec()
+
+        c._set_active_recognizer = _fake_set_active
         track = await c.current_track(None)
         assert track["source"] == "stream"
 
@@ -101,6 +107,9 @@ def test_working_queue_player_survives_transient_ma_none():
 
             def list_players(self):
                 return [{"player_id": "p1", "name": "Kitchen"}]
+
+            def find_playing_player_id(self):
+                return None
 
             async def get_player_state(self, pid):
                 return None  # transient blip
@@ -141,6 +150,49 @@ def test_metadata_first_uses_ma_even_for_external_spotify_connect():
         assert track["from_ma"] is True
         assert track["source"] == "stream"     # external source
         assert track["seekable"] is False       # can't seek a Spotify Connect stream
+
+    asyncio.run(scenario())
+
+
+def test_only_one_recognizer_runs_at_a_time():
+    """Switching streams must stop the previous recognizer (no pile-up that
+    bombards Shazam in parallel)."""
+    class _Cap:
+        async def get_audio(self, duration, key, should_continue=None):
+            return None  # keep recognizers idle/cheap
+
+    async def scenario():
+        c = Controller(ma=None, capture=_Cap())
+        await c._set_active_recognizer("aaaa")
+        assert set(c.recognizers) == {"aaaa"}
+        await c._set_active_recognizer("bbbb")
+        assert set(c.recognizers) == {"bbbb"}      # aaaa stopped
+        await c._stop_all_recognizers()
+        assert c.recognizers == {}
+
+    asyncio.run(scenario())
+
+
+def test_get_audio_requires_fresh_data():
+    """A full but STALE buffer must not be re-recognized; only fresh audio
+    counts (fixes dead/paused streams 'recognizing' the same clip forever)."""
+    import numpy as np
+    from recognition.udp_capture import PlayerStream
+
+    async def scenario():
+        s = PlayerStream(key="x", sample_rate=16000, channels=1)
+        chunk = (np.random.randn(16000 * 7) * 5000).astype("<i2").tobytes()
+        s._buffer.extend(chunk)
+        s._total_received = len(chunk)
+        s.last_seen = time.time()
+
+        first = await s.get_audio(6.0, lambda: True)
+        assert first is not None            # fresh data -> returns a chunk
+
+        # No new packets since; mark the stream dead so the wait can give up.
+        s.last_seen = time.time() - 30
+        second = await s.get_audio(6.0, lambda: True)
+        assert second is None               # no fresh audio -> None (not stale replay)
 
     asyncio.run(scenario())
 
