@@ -187,23 +187,15 @@ class Controller:
         if self.ma and self.ma.connected and ma_id:
             state = await self.ma.get_player_state(ma_id)
 
-        if state is not None:
+        # 1) METADATA-FIRST. If Music Assistant knows the track (it does even for
+        #    Spotify Connect / external sources), use it immediately — it's fast
+        #    and accurate. classify only decides whether seeking is possible.
+        if state is not None and state.title:
             mode = classify_source_mode(state)
-        elif runtime.track.get("source") == "queue" and runtime.track.get("title"):
-            # This player was ALREADY working in queue mode and MA just returned
-            # nothing — treat it as a transient blip and keep the last known
-            # track rather than flipping to recognition. (Only applies once a
-            # real queue state has been seen; a never-seen player / RTP stream
-            # falls through to stream mode below so recognition can start.)
-            self._log_mode(runtime, name, "queue", runtime.track.get("title"), " (ma-none)")
-            return runtime.track
-        else:
-            mode = "stream"
-        runtime.mode = mode
-
-        if mode == "queue" and state is not None:
+            runtime.mode = mode
             track = {
-                "source": "queue",
+                "source": mode,
+                "from_ma": True,
                 "player": name,
                 "title": state.title,
                 "artist": state.artist,
@@ -212,34 +204,46 @@ class Controller:
                 "position": state.position,
                 "duration_ms": state.duration_ms,
                 "is_playing": state.is_playing,
-                "seekable": True,
+                "seekable": mode == "queue",
             }
-        else:
-            stream_key = self._resolve_stream_key(stream_key, ma_id)
-            rec = self._ensure_recognizer(stream_key) if stream_key else None
-            result = rec.current if rec else None
-            if result is None:
-                self._log_mode(runtime, name, "stream",
-                               None, f" (recognizing, stream={stream_key})")
-                runtime.track = {"source": "stream", "player": name, "title": None,
-                                 "artist": None, "is_playing": False, "seekable": False}
-                return runtime.track
-            track = {
-                "source": "stream",
-                "player": name,
-                "title": result.title,
-                "artist": result.artist,
-                "album": result.album,
-                "album_art_url": result.album_art_url,
-                "position": rec.get_position() or 0.0,
-                "duration_ms": int(result.duration * 1000) if result.duration else None,
-                "is_playing": rec.is_playing,
-                "seekable": False,
-            }
+            track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
+            runtime.track = track
+            self._log_mode(runtime, name, mode, track["title"])
+            return track
 
+        # 2) Transient MA read failure (None) on a player that was just showing MA
+        #    metadata — keep the last track rather than flipping to recognition.
+        if state is None and runtime.track.get("from_ma") and runtime.track.get("title"):
+            self._log_mode(runtime, name, runtime.mode, runtime.track.get("title"), " (ma-none)")
+            return runtime.track
+
+        # 3) FALLBACK: recognition, for streams MA can't describe (e.g. radio
+        #    with no now-playing metadata).
+        runtime.mode = "stream"
+        stream_key = self._resolve_stream_key(stream_key, ma_id)
+        rec = self._ensure_recognizer(stream_key) if stream_key else None
+        result = rec.current if rec else None
+        if result is None:
+            self._log_mode(runtime, name, "stream", None,
+                           f" (recognizing, stream={stream_key})")
+            runtime.track = {"source": "stream", "player": name, "title": None,
+                             "artist": None, "is_playing": False, "seekable": False}
+            return runtime.track
+        track = {
+            "source": "stream",
+            "player": name,
+            "title": result.title,
+            "artist": result.artist,
+            "album": result.album,
+            "album_art_url": result.album_art_url,
+            "position": rec.get_position() or 0.0,
+            "duration_ms": int(result.duration * 1000) if result.duration else None,
+            "is_playing": rec.is_playing,
+            "seekable": False,
+        }
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         runtime.track = track
-        self._log_mode(runtime, name, mode, track.get("title"))
+        self._log_mode(runtime, name, "stream", track.get("title"))
         return track
 
     # -- lyrics ------------------------------------------------------------ #
