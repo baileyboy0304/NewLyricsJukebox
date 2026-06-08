@@ -88,11 +88,12 @@ def test_rtp_stream_enters_stream_mode_not_stuck_in_queue():
 
 
 def test_working_queue_player_survives_transient_ma_none():
-    """A player already working in queue mode keeps its track when MA briefly
+    """A player already showing MA metadata keeps its track when MA briefly
     returns None (rather than flipping to recognition)."""
     async def scenario():
-        prev = {"source": "queue", "player": "Kitchen", "title": "Mamma Mia",
-                "artist": "ABBA", "track_id": "ABBA|Mamma Mia", "is_playing": True}
+        prev = {"source": "queue", "from_ma": True, "player": "Kitchen",
+                "title": "Mamma Mia", "artist": "ABBA",
+                "track_id": "ABBA|Mamma Mia", "is_playing": True}
 
         class _MA:
             connected = True
@@ -109,6 +110,37 @@ def test_working_queue_player_survives_transient_ma_none():
         track = await c.current_track(None)
         assert track["source"] == "queue"
         assert track["title"] == "Mamma Mia"
+
+    asyncio.run(scenario())
+
+
+def test_metadata_first_uses_ma_even_for_external_spotify_connect():
+    """MA has the track even for an external Spotify Connect source — use it
+    immediately instead of slow recognition. seekable=False (can't seek)."""
+    from ma_models import PlayerState
+
+    async def scenario():
+        class _MA:
+            connected = True
+            preferred_player_id = "p1"
+
+            def list_players(self):
+                return [{"player_id": "p1", "name": "Respeaker"}]
+
+            async def get_player_state(self, pid):
+                return PlayerState(
+                    player_id="p1", name="Respeaker", state="playing",
+                    title="Candy", artist="Paolo Nutini", album="Sunny Side Up",
+                    position=12.0, duration_ms=298000,
+                    active_source_name="Spotify Connect",  # external -> classify "stream"
+                )
+
+        c = Controller(ma=_MA(), capture=None)
+        track = await c.current_track(None)
+        assert track["title"] == "Candy"
+        assert track["from_ma"] is True
+        assert track["source"] == "stream"     # external source
+        assert track["seekable"] is False       # can't seek a Spotify Connect stream
 
     asyncio.run(scenario())
 

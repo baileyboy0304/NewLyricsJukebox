@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.15
+
+- **Metadata-first: instant track updates (fixes the ~20s lag).** Music Assistant
+  reports the playing track even for external sources (Spotify Connect), so the
+  app now uses MA metadata immediately whenever MA has a title — instead of
+  waiting for Shazam recognition. Recognition is now only a FALLBACK for sources
+  MA can't describe (e.g. radio with no now-playing). Result: the app updates as
+  fast as the MA player. Seeking stays queue-only; external streams are
+  elapsed-only. Recognition no longer runs for players MA already describes.
+
 ## 1.0.14
 
 - Console logging: removed the noisy ~1s `poll` heartbeat. Only change-based
