@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.6
+
+- **Fix the web server freezing (the real cause of the unreachable UI).** The
+  recognition loop could busy-loop and starve the asyncio event loop, so
+  Hypercorn accepted TCP connections but never answered — `curl localhost:9014`
+  hung. Two fixes: the loop now always `await`s/sleeps each cycle (never
+  busy-loops, even with no stream/audio), and recognizers are only started for a
+  real detected RTP stream (the MA player id is not a stream key).
+- Demux RTP streams by SSRC (stable per session) so identity-bearing and plain
+  packets from the same sender form one logical stream, with the MA name/id
+  filled in when they arrive (fixes the same source showing as two streams).
+
 ## 1.0.5
 
 - Web UI still timed out on 1.0.4 even with `host_network: true`. Re-add the

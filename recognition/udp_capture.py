@@ -286,7 +286,11 @@ class UdpAudioCapture:
             return  # RTP-only: silently ignore anything else
         name, ma_id = pkt.ma_identity()
         source_ip = addr[0]
-        key = ma_id or format(pkt.ssrc, "08x") or source_ip
+        # Key by SSRC — stable for the life of one RTP session. Identity packets
+        # (RFC 8285) and plain packets share the same SSRC, so this keeps a
+        # single physical stream as ONE logical stream; the MA name/id are filled
+        # in as soon as an identity-bearing packet arrives.
+        key = format(pkt.ssrc, "08x")
 
         stream = self._streams.get(key)
         if stream is None:
@@ -305,6 +309,9 @@ class UdpAudioCapture:
         else:
             if name and not stream.name:
                 stream.name = name
+                logger.info("Stream %s identified as '%s' (ma_id=%s)", key, name, ma_id)
+            if ma_id and not stream.ma_player_id:
+                stream.ma_player_id = ma_id
             stream.source_ip = source_ip
 
         stream.add_packet(pkt)
