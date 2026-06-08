@@ -18,19 +18,30 @@ from recognition.shazam import ShazamRecognizer
 logger = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_FAILURES = 5
+# Display names for the recognition log line (result.provider is lowercase).
+_PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 # Safety net so a hung Shazam/ACRCloud network call can never stall a recognition
 # cycle. Shazam is normally <3s and the whole chain well under this.
 RECOGNIZE_TIMEOUT = 10.0
 
 
 class LockTracker:
-    """Converges on a stable song position over several recognitions.
+    """Converges on a stable song position over several recognitions — the
+    "3 attempts before locked" method, with the same state progression the
+    original code logged (POSITION LOCKED -> LOCKING (n of N) -> LOCKED ->
+    IGNORED).
 
     A recognition's "sync anchor" is ``offset - capture_start_time`` — invariant
-    across captures of the same song on the same timeline. Two consecutive
-    anchors within ``tolerance`` advance the streak; an outlier restarts it.
-    Once the streak reaches ``lock_after``, position is considered locked and
-    later anchors are ignored (avoids chorus-confusion jumps).
+    across captures of the same song on the same timeline. The first read of a
+    new song is *accepted* immediately (status ``initial``) and becomes the
+    baseline. Each later read within ``tolerance`` of the baseline counts as a
+    confirmation and refines the baseline; an outlier resets the count and
+    re-bases (status ``relock``). After ``lock_after`` confirmations the position
+    is *locked* and later anchors are ignored (avoids chorus-confusion jumps).
+
+    ``offer`` returns a status string consumed by the engine for logging:
+    ``initial`` | ``locking`` | ``locked`` | ``ignored`` | ``relock`` |
+    ``tracking`` (the last when locking is disabled).
     """
 
     def __init__(self, lock_after: int = 3, tolerance: float = 3.0, enabled: bool = True):
@@ -40,35 +51,48 @@ class LockTracker:
         self.reset()
 
     def reset(self):
-        self._anchors = []
-        self.consecutive_good = 0
+        self._baseline: Optional[float] = None  # anchor of the accepted position
+        self.confirmations = 0                  # consistent reads after the initial
+        self.initialized = False
         self.result: Optional[RecognitionResult] = None
 
     @property
     def locked(self) -> bool:
-        return self.enabled and self.consecutive_good >= self.lock_after
+        return self.enabled and self.confirmations >= self.lock_after
 
     def offer(self, result: RecognitionResult) -> str:
-        """Feed a same-song recognition. Returns one of:
-        'locked' (now/already locked, position frozen),
-        'locking' (accepted, still converging),
-        'ignored' (already locked, position untouched)."""
+        """Feed a same-song recognition; returns its lock status (see class doc)."""
+        anchor = result.offset - result.capture_start_time
+
+        # First read of a new song: accept and display immediately.
+        if not self.initialized:
+            self._baseline = anchor
+            self.confirmations = 0
+            self.initialized = True
+            self.result = result
+            return "initial"
+
+        # Locking disabled: always follow the latest recognition.
+        if not self.enabled:
+            self._baseline = anchor
+            self.result = result
+            return "tracking"
+
+        # Already locked: freeze position, ignore later anchors.
         if self.locked:
             return "ignored"
 
-        anchor = result.offset - result.capture_start_time
-        if self._anchors:
-            if abs(anchor - self._anchors[-1]) <= self.tolerance:
-                self.consecutive_good += 1
-            else:
-                self.consecutive_good = 1  # outlier -> restart streak
-                self._anchors = []
-        else:
-            self.consecutive_good = 1
-        self._anchors.append(anchor)
+        if abs(anchor - self._baseline) <= self.tolerance:
+            self.confirmations += 1
+            self._baseline = anchor   # refine toward the converging timeline
+            self.result = result
+            return "locked" if self.locked else "locking"
 
+        # Outlier -> drop the streak and re-base on this read.
+        self._baseline = anchor
+        self.confirmations = 0
         self.result = result
-        return "locked" if self.locked else "locking"
+        return "relock"
 
 
 class PlayerRecognizer:
@@ -184,17 +208,44 @@ class PlayerRecognizer:
         self._failures = 0
         self._paused = False
         if not result.is_same_song(self._current):
-            logger.info("New song on %s: %s", self.key, result)
             self._lock.reset()
-            self._lock.offer(result)
+            status = self._lock.offer(result)  # "initial"
             self._current = result
+            logger.info("Song changed to: %s - %s @ %.1fs",
+                        result.artist, result.title, result.get_current_position())
         else:
-            outcome = self._lock.offer(result)
-            if outcome in ("locking",):
-                self._current = result  # refine position while converging
-            # 'ignored'/'locked' -> keep the locked position
+            status = self._lock.offer(result)
+            if status != "ignored":
+                self._current = result  # refine position until locked
+            # 'ignored' -> keep the locked position
+        self._log_recognition(result, status)
         if self._on_update:
             self._on_update(self)
+
+    def _log_recognition(self, result: RecognitionResult, status: str):
+        """Per-recognition position/lock log line (matches the original format,
+        so the lock cycle is visible: LOCKED -> LOCKING (n of N) -> LOCKED ->
+        IGNORED)."""
+        n = self._lock.lock_after
+        if status == "initial":
+            pos = "LOCKED"
+        elif status == "locking":
+            pos = "LOCKING (%d of %d)" % (self._lock.confirmations, n)
+        elif status == "locked":
+            pos = "LOCKING (%d of %d) - LOCKED" % (n, n)
+        elif status == "relock":
+            pos = "RE-LOCKING (outlier, position reset)"
+        elif status == "tracking":
+            pos = "TRACKING (lock disabled)"
+        else:  # ignored
+            pos = "IGNORED"
+        logger.info(
+            "%s Recognized: %s - %s | Offset: %.1fs | Latency: %.1fs | "
+            "Current: %.1fs | Skew: t=%.6f, f=%.4f | POSITION %s",
+            _PROVIDER_LABELS.get(result.provider, result.provider.title()),
+            result.artist, result.title, result.offset, result.get_latency(),
+            result.get_current_position(), result.time_skew,
+            result.frequency_skew, pos)
 
     async def _handle_failure(self):
         self._failures += 1
