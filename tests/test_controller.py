@@ -154,6 +154,47 @@ def test_metadata_first_uses_ma_even_for_external_spotify_connect():
     asyncio.run(scenario())
 
 
+def test_radio_uses_recognition_not_ma_station_name():
+    """For radio, MA's title is the station name — must NOT be shown; fall
+    through to recognition instead."""
+    from ma_models import PlayerState
+
+    class _MA:
+        connected = True
+        preferred_player_id = None
+
+        def list_players(self):
+            return [{"player_id": "p1", "name": "Radio"}]
+
+        def find_playing_player_id(self):
+            return None
+
+        async def get_player_state(self, pid):
+            return PlayerState(player_id="p1", name="Radio", state="playing",
+                               title="Smooth Radio (London, UK)",
+                               artist="Luther Vandross", media_type="radio")
+
+    async def scenario():
+        c = Controller(ma=_MA(), capture=_Capture())
+
+        class _Rec:
+            current = None
+            is_playing = False
+
+            def get_position(self):
+                return 0.0
+
+        async def fake_set_active(stream_key):
+            return _Rec()
+
+        c._set_active_recognizer = fake_set_active
+        track = await c.current_track(None)
+        assert track["source"] == "stream"
+        assert track["title"] != "Smooth Radio (London, UK)"
+
+    asyncio.run(scenario())
+
+
 def test_only_one_recognizer_runs_at_a_time():
     """Switching streams must stop the previous recognizer (no pile-up that
     bombards Shazam in parallel)."""

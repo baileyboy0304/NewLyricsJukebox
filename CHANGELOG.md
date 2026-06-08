@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.17
+
+- **Radio now uses UDP recognition, not the station name.** For radio sources MA
+  reports the *station* as the title (e.g. "Smooth Radio (London, UK) 48k aac+")
+  with the artist, which produced nonsense lyric lookups. metadata-first now
+  excludes `media_type == "radio"`, so radio falls through to Shazam recognition
+  to identify the actual song. Real tracks (queue, Spotify Connect) still use MA
+  metadata instantly.
+
 ## 1.0.16
 
 - **Stop piling up recognizers (the "bombarding"/jumping/"continues after pause"
