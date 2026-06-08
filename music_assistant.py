@@ -25,6 +25,21 @@ def _state_str(value) -> str:
     return str(val).lower()
 
 
+def _coalesce_media_type(*types) -> Optional[str]:
+    """Combine media-type signals, letting ``radio`` win.
+
+    On radio, MA enriches the now-playing into track metadata (album/duration),
+    so the queue ``media_item`` can look like a plain track while the player's
+    ``current_media`` is still a radio stream. If ANY signal says radio, the
+    player is on radio — keep it classified that way so we recognize the audio
+    instead of trusting the (often mismatched/lagging) station metadata.
+    """
+    present = [t for t in types if t and t != "idle"]
+    if any(t == "radio" for t in present):
+        return "radio"
+    return present[0] if present else None
+
+
 class MusicAssistant:
     def __init__(self):
         self._url = MUSIC_ASSISTANT["server_url"]
@@ -145,6 +160,7 @@ class MusicAssistant:
         position = 0.0
         position_last_updated = now()
 
+        item_media_type = current_media_type = None
         current_item = getattr(queue, "current_item", None) if queue else None
         media_item = getattr(current_item, "media_item", None) if current_item else None
         if media_item is not None:
@@ -153,14 +169,16 @@ class MusicAssistant:
             artist = artists[0].name if artists else getattr(media_item, "artist", None)
             album_obj = getattr(media_item, "album", None)
             album = getattr(album_obj, "name", None) if album_obj else None
-            media_type = _state_str(getattr(media_item, "media_type", None))
+            item_media_type = _state_str(getattr(media_item, "media_type", None))
         current_media = getattr(player, "current_media", None)
         if current_media is not None:
             title = title or getattr(current_media, "title", None)
             artist = artist or getattr(current_media, "artist", None)
             album = album or getattr(current_media, "album", None)
             image_url = getattr(current_media, "image_url", None)
-            media_type = media_type or _state_str(getattr(current_media, "media_type", None))
+            current_media_type = _state_str(getattr(current_media, "media_type", None))
+        # Radio wins over an enriched track type (see _coalesce_media_type).
+        media_type = _coalesce_media_type(item_media_type, current_media_type)
 
         if current_item is not None and getattr(current_item, "duration", None):
             duration_ms = int(current_item.duration * 1000)

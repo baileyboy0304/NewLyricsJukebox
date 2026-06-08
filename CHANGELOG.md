@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.26
+
+- **Fix the Spotify Connect → radio lockup.** Switching from Spotify Connect to
+  radio left the app frozen on the last Connect track with no recognition. Root
+  cause: the selected player key is a *stale SSRC* (the respeaker reconnects with
+  a new SSRC on every source change), so it no longer resolved to a live MA
+  player — `state` came back `None`, the radio guard couldn't fire, and the
+  "follow the actually-playing MA player" step latched onto the lingering Connect
+  player (still reported as "playing" the old track). `current_track` now
+  re-points an unresolved selection at the stream actually delivering audio, so it
+  classifies the **current** source: the live stream is on radio → recognition
+  runs instead of following the ghost Connect track.
+
+## 1.0.25
+
+- **Radio detection is robust to MA-enriched metadata.** `get_player_state` now
+  lets **radio win** across the queue `media_item` and the player's
+  `current_media` — the player is still on a radio stream even when MA enriches
+  the now-playing into track metadata (album/duration) — so radio stays in
+  recognition mode and the follow-playing-player step can't hijack it.
+- **Added an `ma-class` diagnostic log** (`media_type` / `active_source` /
+  `playing`, deduped per change) to make radio/Connect routing decisions traceable.
+
 ## 1.0.24
 
 - **Fix switching Spotify Connect → radio leaving the app stuck on the old

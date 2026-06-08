@@ -32,6 +32,7 @@ class PlayerRuntime:
     lyrics_task: object = None        # background fetch task for the current track
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
+    log_class: Optional[str] = None   # last MA classification we logged
 
 
 class Controller:
@@ -231,6 +232,28 @@ class Controller:
         state: Optional[PlayerState] = None
         if self.ma and self.ma.connected and ma_id:
             state = await self.ma.get_player_state(ma_id)
+
+        # The selected key can be a STALE SSRC: the respeaker reconnects with a
+        # new SSRC on every source change, so the originally-selected stream key
+        # no longer resolves to a live player. Re-point at the stream actually
+        # delivering our audio now, so we classify the CURRENT source (radio vs
+        # Spotify Connect) instead of a ghost id — otherwise a switch to radio
+        # gets stuck behind a lingering "still playing" Connect player (1b below).
+        if state is None and self.capture:
+            live = self.capture.first_active_stream()
+            if live is not None and live.ma_player_id and live.ma_player_id != ma_id:
+                ma_id, stream_key = live.ma_player_id, live.key
+                if self.ma and self.ma.connected:
+                    state = await self.ma.get_player_state(ma_id)
+
+        if state is not None:
+            # Diagnostic: how MA classifies the resolved player (so a misrouted
+            # radio/Connect decision can be traced). Deduped per change.
+            desc = "mt=%s source=%s playing=%s" % (
+                state.media_type, state.active_source_name, state.is_playing)
+            if runtime.log_class != desc:
+                runtime.log_class = desc
+                logger.info("ma-class player=%s %s title=%r", name, desc, state.title)
 
         # 1) METADATA-FIRST: if MA knows the real track (queue or Spotify
         #    Connect), use it immediately. Radio is excluded — MA's title there is
