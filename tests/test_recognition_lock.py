@@ -56,17 +56,27 @@ def test_single_outlier_after_lock_stays_ignored():
 
 
 def test_sustained_shift_breaks_lock_and_reacquires():
-    """A radio skip: a NEW, self-consistent timeline persisting for lock_after
-    reads must break the lock and re-acquire (not be ignored forever)."""
-    lt = LockTracker(lock_after=3, tolerance=3.0)
+    """A radio skip: a NEW, self-consistent timeline persisting for relock_after
+    reads must break the lock and re-acquire (not be ignored forever). Default
+    relock_after=2 auto-corrects after two recognitions."""
+    lt = LockTracker(lock_after=3, tolerance=3.0, relock_after=2)
     for off, cs in [(10, 0), (15, 5), (20, 10), (25, 15)]:
         lt.offer(make(off, cs))               # locked on anchor 10
     # New timeline: anchor = offset - capture_start = constant 50.
-    assert lt.offer(make(70, 20)) == "ignored"    # drift 1 of 3
-    assert lt.offer(make(76, 26)) == "ignored"    # drift 2 of 3 (anchor 50)
-    assert lt.offer(make(82, 32)) == "reacquire"  # drift 3 -> re-acquire
+    assert lt.offer(make(70, 20)) == "ignored"    # drift 1 of 2
+    assert lt.offer(make(76, 26)) == "reacquire"  # drift 2 -> re-acquire
     assert lt.locked
-    assert lt.offer(make(88, 38)) == "ignored"    # in sync on the new timeline
+    assert lt.offer(make(82, 32)) == "ignored"    # in sync on the new timeline
+
+
+def test_relock_after_threshold_is_independent():
+    """relock_after can require more reads than the default before re-acquiring."""
+    lt = LockTracker(lock_after=3, tolerance=3.0, relock_after=3)
+    for off, cs in [(10, 0), (15, 5), (20, 10), (25, 15)]:
+        lt.offer(make(off, cs))
+    assert lt.offer(make(70, 20)) == "ignored"    # drift 1 of 3
+    assert lt.offer(make(76, 26)) == "ignored"    # drift 2 of 3
+    assert lt.offer(make(82, 32)) == "reacquire"  # drift 3 -> re-acquire
 
 
 def test_tracking_when_lock_disabled():

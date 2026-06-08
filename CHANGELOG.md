@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.21
+
+- **Configurable re-acquire threshold (`relock_position_after`, default 2).** The
+  number of consecutive agreeing recognitions on a new timeline needed to break
+  the lock and re-acquire is now its own add-on option, separate from
+  `lock_position_after`. At the default of 2 (~12s at a 6s recognition cadence) a
+  radio skip auto-corrects faster than the initial lock requires.
+
 ## 1.0.20
 
 - **Break the position lock on a sustained timeline shift (radio skip/rebuffer).**

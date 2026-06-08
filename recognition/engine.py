@@ -40,18 +40,21 @@ class LockTracker:
     is *locked* and later anchors are ignored (avoids chorus-confusion jumps).
 
     A lock is not forever: a *single* off-baseline read while locked is still
-    ignored, but ``lock_after`` consecutive reads that agree with each other on a
-    NEW timeline (e.g. a radio stream skip/rebuffer) break the lock and re-acquire
-    on the new position (status ``reacquire``) — otherwise the position stays
-    frozen while the song has moved on.
+    ignored, but ``relock_after`` consecutive reads that agree with each other on
+    a NEW timeline (e.g. a radio stream skip/rebuffer) break the lock and
+    re-acquire on the new position (status ``reacquire``) — otherwise the position
+    stays frozen while the song has moved on. ``relock_after`` is separate from
+    ``lock_after`` so re-acquisition can be quicker than the initial lock.
 
     ``offer`` returns a status string consumed by the engine for logging:
     ``initial`` | ``locking`` | ``locked`` | ``ignored`` | ``relock`` |
     ``reacquire`` | ``tracking`` (the last when locking is disabled).
     """
 
-    def __init__(self, lock_after: int = 3, tolerance: float = 3.0, enabled: bool = True):
+    def __init__(self, lock_after: int = 3, tolerance: float = 3.0,
+                 enabled: bool = True, relock_after: int = 2):
         self.lock_after = lock_after
+        self.relock_after = relock_after
         self.tolerance = tolerance
         self.enabled = enabled
         self.reset()
@@ -100,7 +103,7 @@ class LockTracker:
             else:
                 self._drift_count = 1
             self._drift_anchor = anchor
-            if self._drift_count >= self.lock_after:
+            if self._drift_count >= self.relock_after:
                 self._baseline = anchor      # re-acquire on the new timeline
                 self._drift_anchor = None
                 self._drift_count = 0
@@ -134,6 +137,7 @@ class PlayerRecognizer:
             lock_after=UDP_AUDIO["lock_position_after"],
             tolerance=UDP_AUDIO["lock_consensus_tolerance"],
             enabled=UDP_AUDIO["lock_position"],
+            relock_after=UDP_AUDIO["relock_position_after"],
         )
         self._interval = AUDIO_RECOGNITION["recognition_interval"]
         self._capture_duration = AUDIO_RECOGNITION["capture_duration"]
