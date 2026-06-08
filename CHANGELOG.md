@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.10
+
+- **Fix regression in 1.0.9 that stopped recognition entirely.** RTP streams
+  advertise an MA id via the RTP header extension, and the 1.0.9 transient-None
+  guard treated any id as "MA-backed", so a stream got stuck in queue mode with
+  no metadata and recognition never started. The guard now only keeps queue mode
+  for a player that was ALREADY producing a real queue track; never-seen players
+  / RTP streams correctly enter stream/recognition mode.
+
 ## 1.0.9
 
 - **Lyrics now appear immediately (fixes the ~10s+ delay).** `fetch()` applied

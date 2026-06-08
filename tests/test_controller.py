@@ -33,6 +33,86 @@ class _SlowFail:
         return None
 
 
+class _Stream:
+    key = "4efd289d"
+    ma_player_id = "a0505ec6"
+    name = "respeaker_lyrics"
+    source_ip = "192.168.1.137"
+    ssrc = 0x4EFD289D
+    active = True
+
+
+class _Capture:
+    def list_streams(self):
+        return []
+
+    def get_stream(self, k):
+        return _Stream() if k == "4efd289d" else None
+
+    def find_stream(self, **kw):
+        return _Stream() if kw.get("ma_player_id") == "a0505ec6" else None
+
+    def first_active_stream(self):
+        return _Stream()
+
+
+class _MANoPlayers:
+    connected = True
+    preferred_player_id = None
+
+    def list_players(self):
+        return []
+
+    async def get_player_state(self, pid):
+        return None
+
+
+def test_rtp_stream_enters_stream_mode_not_stuck_in_queue():
+    """Regression: an RTP stream advertises an MA id, but MA has no such player.
+    It must enter stream/recognition mode, not get stuck in queue mode."""
+    async def scenario():
+        c = Controller(ma=_MANoPlayers(), capture=_Capture())
+
+        class _Rec:
+            current = None
+            is_playing = False
+
+            def get_position(self):
+                return 0.0
+
+        c._ensure_recognizer = lambda key: _Rec()
+        track = await c.current_track(None)
+        assert track["source"] == "stream"
+
+    asyncio.run(scenario())
+
+
+def test_working_queue_player_survives_transient_ma_none():
+    """A player already working in queue mode keeps its track when MA briefly
+    returns None (rather than flipping to recognition)."""
+    async def scenario():
+        prev = {"source": "queue", "player": "Kitchen", "title": "Mamma Mia",
+                "artist": "ABBA", "track_id": "ABBA|Mamma Mia", "is_playing": True}
+
+        class _MA:
+            connected = True
+            preferred_player_id = "p1"
+
+            def list_players(self):
+                return [{"player_id": "p1", "name": "Kitchen"}]
+
+            async def get_player_state(self, pid):
+                return None  # transient blip
+
+        c = Controller(ma=_MA(), capture=None)
+        c.runtimes["p1"] = PlayerRuntime(key="p1", mode="queue", track=dict(prev))
+        track = await c.current_track(None)
+        assert track["source"] == "queue"
+        assert track["title"] == "Mamma Mia"
+
+    asyncio.run(scenario())
+
+
 def test_lyrics_response_is_non_blocking():
     async def scenario():
         c = Controller(ma=None, capture=None)
