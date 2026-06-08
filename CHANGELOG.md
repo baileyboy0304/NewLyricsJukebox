@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.7
+
+- Fix `/current-track` 500 (`TypeError: unhashable type: 'PlayerQueue'`): this
+  Music Assistant client version returns a `PlayerQueue` object from
+  `get_active_queue()`, not an id string. Normalize to (queue, queue_id) in both
+  state reads and seek.
+- Fix `/lyrics` 500 (`KeyError` on an `as_completed` wrapper): parallel provider
+  fetch no longer relies on identifying the originating task; each task returns
+  `(provider, result)`. Regression test added.
+
 ## 1.0.6
 
 - **Fix the web server freezing (the real cause of the unreachable UI).** The
