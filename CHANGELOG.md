@@ -2,6 +2,13 @@
 
 ## 1.0.18
 
+- **Fix the recognizer freezing after a radio station change.** Switching
+  stations makes the respeaker reconnect with a *new* RTP SSRC, so the previous
+  stream goes silent but lingers in the table with the same MA id/name.
+  `find_stream`/`first_active_stream` returned the first match in insertion order
+  — the dead stream — so the recognizer stayed bound to it, got no audio, and
+  paused (lyrics stopped). They now return the *freshest* matching stream, so the
+  recognizer migrates to the live one automatically.
 - **Restore the original position/lock logging.** Each recognition now logs a
   single line showing the engine, track, `Offset`, `Latency`, `Current`
   position, `Skew` (time/frequency) and the lock state — matching the original

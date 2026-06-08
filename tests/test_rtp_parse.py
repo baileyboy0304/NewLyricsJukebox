@@ -6,7 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from recognition.udp_capture import RtpPacket, parse_rtp_ext_elements  # noqa: E402
+from recognition.udp_capture import (  # noqa: E402
+    PlayerStream, RtpPacket, UdpAudioCapture, parse_rtp_ext_elements)
 
 
 def build_rtp(payload=b"\x01\x00\x02\x00", seq=100, ssrc=0xDEADBEEF,
@@ -75,3 +76,33 @@ def test_parse_ext_elements_one_byte():
     out = parse_rtp_ext_elements(0xBEDE, body)
     assert out[1] == b"Hi"
     assert out[2] == b"X"
+
+
+# --- stream migration on reconnect (new SSRC, same player identity) ---------- #
+
+
+def _stream(cap, key, ssrc, last_seen, name="respeaker_lyrics",
+            ma_id="a0505ec6", ip="192.168.1.137"):
+    s = PlayerStream(key=key, sample_rate=16000, channels=1, name=name,
+                     ma_player_id=ma_id, source_ip=ip, ssrc=ssrc)
+    s.last_seen = last_seen
+    cap._streams[key] = s
+    return s
+
+
+def test_find_stream_prefers_freshest_on_reconnect():
+    """A station change makes the respeaker reconnect with a new SSRC; the old,
+    now-silent stream lingers with the same ma_id/name. find_stream must return
+    the live (freshest) stream so the recognizer migrates instead of sticking to
+    the dead one."""
+    import time
+    cap = UdpAudioCapture()
+    now = time.time()
+    dead = _stream(cap, "73d34824", 0x73D34824, last_seen=now - 120)
+    live = _stream(cap, "e6ba4a5a", 0xE6BA4A5A, last_seen=now - 0.5)
+
+    assert cap.find_stream(ma_player_id="a0505ec6") is live
+    assert cap.find_stream(name="respeaker_lyrics") is live
+    assert cap.first_active_stream() is live
+    # Exact SSRC still resolves the specific (even dead) stream.
+    assert cap.find_stream(ssrc=0x73D34824) is dead

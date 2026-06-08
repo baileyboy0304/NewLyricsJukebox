@@ -342,22 +342,44 @@ class UdpAudioCapture:
         return self._streams.get(key)
 
     def find_stream(self, *, ma_player_id=None, name=None, ssrc=None, source_ip=None) -> Optional[PlayerStream]:
-        for s in self._streams.values():
-            if ma_player_id and s.ma_player_id == ma_player_id:
-                return s
-            if name and s.name == name:
-                return s
-            if ssrc is not None and s.ssrc == ssrc:
-                return s
-            if source_ip and s.source_ip == source_ip:
-                return s
+        """Resolve an identity to a stream, preferring the FRESHEST match.
+
+        A player (e.g. the respeaker) reconnects with a NEW SSRC on every
+        station/source change, leaving the previous, now-silent stream in the
+        table with the same ma_player_id/name. Returning the first match in
+        insertion order would keep handing back the dead stream, so the
+        recognizer never migrates to the live one (lyrics freeze). For each
+        criterion in priority order we therefore pick the stream with the most
+        recent ``last_seen``.
+        """
+        streams = list(self._streams.values())
+
+        def freshest(matches):
+            return max(matches, key=lambda s: s.last_seen) if matches else None
+
+        if ma_player_id:
+            m = freshest([s for s in streams if s.ma_player_id == ma_player_id])
+            if m:
+                return m
+        if name:
+            m = freshest([s for s in streams if s.name == name])
+            if m:
+                return m
+        if ssrc is not None:
+            m = freshest([s for s in streams if s.ssrc == ssrc])
+            if m:
+                return m
+        if source_ip:
+            m = freshest([s for s in streams if s.source_ip == source_ip])
+            if m:
+                return m
         return None
 
     def first_active_stream(self) -> Optional[PlayerStream]:
-        for s in self._streams.values():
-            if s.active:
-                return s
-        return None
+        """The freshest currently-live stream (not merely the first in order, so
+        a reconnect's new stream wins over a stale one still inside the window)."""
+        active = [s for s in self._streams.values() if s.active]
+        return max(active, key=lambda s: s.last_seen) if active else None
 
     async def get_audio(self, duration: float, key: str, should_continue=None) -> Optional[AudioChunk]:
         stream = self._streams.get(key)
