@@ -57,3 +57,35 @@ def test_position_interpolates_from_offset():
     r = make(30.0, time.time() - 2.0)  # captured 2s ago at 30s in
     pos = r.get_current_position()
     assert 31.5 < pos < 32.5
+
+
+def test_loop_does_not_starve_event_loop_when_no_stream():
+    """Regression: a recognizer whose stream key doesn't exist must still yield
+    each cycle, or it busy-loops and freezes the whole asyncio app (and the web
+    server with it)."""
+    import asyncio
+
+    from recognition.engine import PlayerRecognizer
+    from recognition.udp_capture import UdpAudioCapture
+
+    async def scenario():
+        capture = UdpAudioCapture()  # no socket started, no streams
+        rec = PlayerRecognizer("does-not-exist", capture)
+        rec._interval = 0.01
+        rec.start()
+
+        ticks = []
+
+        async def other():
+            for _ in range(5):
+                await asyncio.sleep(0.01)
+                ticks.append(1)
+
+        # If the recognition loop busy-spun, this concurrent coroutine would
+        # never get scheduled and wait_for would time out.
+        await asyncio.wait_for(other(), timeout=2.0)
+        await rec.stop()
+        return ticks
+
+    ticks = asyncio.run(scenario())
+    assert len(ticks) == 5

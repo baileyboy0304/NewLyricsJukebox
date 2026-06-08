@@ -139,16 +139,19 @@ class PlayerRecognizer:
                     self._capture_duration, self.key, lambda: self._running)
                 if audio is None:
                     await self._handle_failure()
-                    continue
-                result = await self._recognize_once(audio)
-                if result is None:
-                    await self._handle_failure()
                 else:
-                    self._handle_success(result)
+                    result = await self._recognize_once(audio)
+                    if result is None:
+                        await self._handle_failure()
+                    else:
+                        self._handle_success(result)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Recognition loop error: %s", exc)
+            # ALWAYS yield/sleep each cycle — never busy-loop, even when there is
+            # no stream/audio (otherwise the event loop starves and the web
+            # server stops responding).
             await asyncio.sleep(self._interval)
 
     def _handle_success(self, result: RecognitionResult):

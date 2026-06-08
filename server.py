@@ -138,6 +138,24 @@ class Controller:
 
     # -- recognition management ------------------------------------------- #
 
+    def _resolve_stream_key(self, stream_key, ma_id):
+        """Map a candidate key to an actual detected RTP stream.
+
+        The MA player id (e.g. 'player-3') is NOT an RTP stream key (streams are
+        keyed by SSRC), so never start a recognizer on it. Prefer an exact match,
+        then a stream whose MA identity matches, then the first active stream.
+        """
+        if not self.capture:
+            return None
+        if stream_key and self.capture.get_stream(stream_key):
+            return stream_key
+        if ma_id:
+            s = self.capture.find_stream(ma_player_id=ma_id)
+            if s:
+                return s.key
+        s = self.capture.first_active_stream()
+        return s.key if s else None
+
     def _ensure_recognizer(self, stream_key: str):
         if not stream_key or not self.capture:
             return None
@@ -177,8 +195,8 @@ class Controller:
                 "seekable": True,
             }
         else:
-            stream_key = stream_key or (state.player_id if state else key)
-            rec = self._ensure_recognizer(stream_key)
+            stream_key = self._resolve_stream_key(stream_key, ma_id)
+            rec = self._ensure_recognizer(stream_key) if stream_key else None
             result = rec.current if rec else None
             if result is None:
                 runtime.track = {"source": "stream", "player": name, "title": None,
