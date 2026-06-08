@@ -14,22 +14,23 @@ def make(offset, capture_start, title="Song", artist="Artist"):
                              capture_start_time=capture_start)
 
 
-def test_locks_after_three_consistent():
+def test_locks_after_initial_plus_three_confirmations():
     lt = LockTracker(lock_after=3, tolerance=3.0)
     # Same timeline: anchor = offset - capture_start = constant 10.0
-    assert lt.offer(make(10, 0)) == "locking"
-    assert lt.offer(make(15, 5)) == "locking"   # anchor 10.0
-    assert lt.offer(make(20, 10)) == "locked"   # anchor 10.0, 3rd good
+    assert lt.offer(make(10, 0)) == "initial"   # first read accepted/displayed
+    assert lt.offer(make(15, 5)) == "locking"   # confirmation 1 of 3
+    assert lt.offer(make(20, 10)) == "locking"  # confirmation 2 of 3
+    assert lt.offer(make(25, 15)) == "locked"   # confirmation 3 of 3 -> LOCKED
     assert lt.locked is True
 
 
 def test_outlier_resets_streak():
     lt = LockTracker(lock_after=3, tolerance=3.0)
-    lt.offer(make(10, 0))           # anchor 10
-    lt.offer(make(15, 5))           # anchor 10 -> good (2)
-    lt.offer(make(50, 5))           # anchor 45 -> outlier, reset to 1
+    lt.offer(make(10, 0))                    # initial, anchor 10
+    assert lt.offer(make(15, 5)) == "locking"   # anchor 10 -> confirmation 1
+    assert lt.offer(make(50, 5)) == "relock"    # anchor 45 -> outlier, reset
     assert lt.locked is False
-    assert lt.consecutive_good == 1
+    assert lt.confirmations == 0
 
 
 def test_ignores_after_locked():
@@ -37,17 +38,28 @@ def test_ignores_after_locked():
     lt.offer(make(10, 0))
     lt.offer(make(15, 5))
     lt.offer(make(20, 10))
+    lt.offer(make(25, 15))
     assert lt.locked
     # A wildly different anchor after lock is ignored, not applied.
     assert lt.offer(make(100, 0)) == "ignored"
     assert lt.locked
 
 
+def test_tracking_when_lock_disabled():
+    lt = LockTracker(lock_after=3, tolerance=3.0, enabled=False)
+    assert lt.offer(make(10, 0)) == "initial"
+    # Never locks; always follows the latest recognition.
+    assert lt.offer(make(15, 5)) == "tracking"
+    assert lt.offer(make(99, 0)) == "tracking"
+    assert lt.locked is False
+
+
 def test_reset_clears_state():
     lt = LockTracker(lock_after=3, tolerance=3.0)
     lt.offer(make(10, 0))
     lt.reset()
-    assert lt.consecutive_good == 0
+    assert lt.confirmations == 0
+    assert lt.initialized is False
     assert lt.result is None
     assert lt.locked is False
 

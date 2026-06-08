@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.18
+
+- **Fix the recognizer freezing after a radio station change.** Switching
+  stations makes the respeaker reconnect with a *new* RTP SSRC, so the previous
+  stream goes silent but lingers in the table with the same MA id/name.
+  `find_stream`/`first_active_stream` returned the first match in insertion order
+  — the dead stream — so the recognizer stayed bound to it, got no audio, and
+  paused (lyrics stopped). They now return the *freshest* matching stream, so the
+  recognizer migrates to the live one automatically.
+- **Restore the original position/lock logging.** Each recognition now logs a
+  single line showing the engine, track, `Offset`, `Latency`, `Current`
+  position, `Skew` (time/frequency) and the lock state — matching the original
+  format so the "3 attempts before locked" cycle is visible:
+  `POSITION LOCKED` (first read accepted) -> `LOCKING (1 of 3)` ->
+  `LOCKING (2 of 3)` -> `LOCKING (3 of 3) - LOCKED` -> `IGNORED`. A song change
+  logs `Song changed to: <artist> - <title> @ <pos>s`.
+- **Lock cycle matches the original semantics.** `LockTracker` now accepts and
+  displays the first recognition immediately, then requires `lock_position_after`
+  (default 3) *consistent confirmations* before freezing the position; an outlier
+  resets the streak (`RE-LOCKING`) instead of locking onto a bad reading. This is
+  what corrects a wrong initial position (e.g. a chorus-confused offset) instead
+  of letting it stick. When `lock_position` is off, position simply tracks the
+  latest recognition (`TRACKING`).
+
 ## 1.0.17
 
 - **Radio now uses UDP recognition, not the station name.** For radio sources MA
