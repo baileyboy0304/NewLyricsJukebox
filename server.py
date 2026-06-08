@@ -219,6 +219,8 @@ class Controller:
             rec = self._ensure_recognizer(stream_key) if stream_key else None
             result = rec.current if rec else None
             if result is None:
+                self._log_mode(runtime, name, "stream",
+                               None, f" (recognizing, stream={stream_key})")
                 runtime.track = {"source": "stream", "player": name, "title": None,
                                  "artist": None, "is_playing": False, "seekable": False}
                 return runtime.track

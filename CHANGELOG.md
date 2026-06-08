@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.12
+
+- **Recognition visibility (diagnose "first boot doesn't detect").** The engine
+  now logs each recognition outcome (throttled): `Recognize <key>: no match
+  (audio level=…)`, `no audio (stream idle/too short)`, plus the existing
+  `New song …` on success. Previously only a successful match logged, so a
+  non-matching cold boot looked silent/broken. `current-track` also logs
+  `mode=stream (recognizing, stream=…)` while waiting for the first match.
+- **Faster first detection.** Shazam's core (~5s one-time init) is now warmed up
+  at startup in the background, so the first real recognition isn't delayed by it.
+- No changes to the recognition/detection logic itself — additive only.
+
 ## 1.0.11
 
 - **Per-provider enable/disable in add-on options** (`provider_spotify`,

@@ -46,6 +46,20 @@ class ShazamRecognizer:
         except ImportError:
             return False
 
+    async def warmup(self):
+        """Force the heavy ShazamIO/Rust core to initialize ahead of time so the
+        first real recognition isn't delayed by ~5s of one-time setup. Best
+        effort — a no-match on random noise is fine."""
+        try:
+            import numpy as np
+            samples = (np.random.randn(16000 * 3) * 600).astype(np.int16)
+            chunk = AudioChunk(data=samples, sample_rate=16000, channels=1,
+                               duration=3.0, capture_start_time=0.0)
+            await self.recognize(chunk)
+            logger.info("Shazam recognizer warmed up")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Shazam warmup skipped: %s", exc)
+
     async def recognize(self, audio: AudioChunk) -> Optional[RecognitionResult]:
         if audio.is_silent(MIN_AUDIO_LEVEL):
             return None
