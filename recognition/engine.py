@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_FAILURES = 5
 # Safety net so a hung Shazam/ACRCloud network call can never stall a recognition
-# cycle for minutes. Shazam is normally <3s and the whole chain well under this.
-RECOGNIZE_TIMEOUT = 20.0
+# cycle. Shazam is normally <3s and the whole chain well under this.
+RECOGNIZE_TIMEOUT = 10.0
 
 
 class LockTracker:

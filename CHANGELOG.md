@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.14
+
+- Console logging: removed the noisy ~1s `poll` heartbeat. Only change-based
+  lines remain — `metadata` (track change), `lyrics` (availability), `line`
+  (active lyric line), plus `playstate` and the startup `app started` line.
+- Lowered the recognition network timeout from 20s to 10s.
+
 ## 1.0.13
 
 - **Fix the multi-minute startup stall in recognition.** The first outbound

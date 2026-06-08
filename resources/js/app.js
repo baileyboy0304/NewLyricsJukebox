@@ -16,7 +16,6 @@ let lyricStatus = '';           // shown on the center line when no synced lyric
 let currentTrackId = null;
 let lastActiveIdx = -2;         // for logging line changes
 let lastIsPlaying = null;
-let lastPollLog = 0;            // throttle for the heartbeat log
 let seekable = false;
 let durationMs = null;
 let isScrubbing = false;
@@ -86,20 +85,6 @@ async function pollTrack() {
     nljLog('playstate', { is_playing: data.is_playing, position: Number((data.position || 0).toFixed(2)) });
   }
   lastIsPlaying = data.is_playing;
-
-  // Heartbeat (~1s): continuous timing data to compare against the add-on log —
-  // server position vs the local flywheel position.
-  const nowMs = Date.now();
-  if (nowMs - lastPollLog > 1000) {
-    lastPollLog = nowMs;
-    nljLog('poll', {
-      source: data.source,
-      server_pos: Number((data.position || 0).toFixed(2)),
-      flywheel: Number(flywheel.visualPosition.toFixed(2)),
-      is_playing: data.is_playing,
-      dur_ms: data.duration_ms,
-    });
-  }
 
   seekable = !!data.seekable;
   durationMs = data.duration_ms;
