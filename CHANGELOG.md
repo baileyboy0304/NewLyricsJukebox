@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.23
+
+- **Spotify Connect metadata/album art updates immediately, not after ~10s.** The
+  "follow whichever MA player is actually playing" fallback — for grouped/external
+  setups where the track lives on a coordinator/Connect player, not the player our
+  RTP stream resolves to — was gated to *auto* mode only. Since the browser polls
+  with a *selected* player, a natural Spotify Connect track change was missed and
+  the app waited for the next recognition (~10s). It now runs for a selected
+  player too, so MA metadata is used as soon as it changes. Radio is still
+  excluded (`_is_radio`) and falls through to recognition as before.
+
 ## 1.0.22
 
 - **A single rogue recognition no longer disturbs the lock or the lyrics.**

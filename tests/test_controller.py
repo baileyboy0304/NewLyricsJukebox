@@ -154,6 +154,41 @@ def test_metadata_first_uses_ma_even_for_external_spotify_connect():
     asyncio.run(scenario())
 
 
+def test_selected_player_follows_playing_spotify_connect_player():
+    """A SELECTED RTP stream whose own MA player has no track must follow the
+    actually-playing MA player (Spotify Connect coordinator) immediately, instead
+    of falling through to ~10s recognition."""
+    from ma_models import PlayerState
+
+    async def scenario():
+        class _MA:
+            connected = True
+            preferred_player_id = None
+
+            def list_players(self):
+                return [{"player_id": "a0505ec6", "name": "Respeaker"}]
+
+            def find_playing_player_id(self):
+                return "coordinator"   # a different player holds the Connect track
+
+            async def get_player_state(self, pid):
+                if pid == "coordinator":
+                    return PlayerState(
+                        player_id="coordinator", name="Group", state="playing",
+                        title="Candy", artist="Paolo Nutini",
+                        active_source_name="Spotify Connect")
+                return None  # the resolved respeaker player has no track itself
+
+        c = Controller(ma=_MA(), capture=_Capture())
+        # Select the RTP stream explicitly (param is a stream key, not "auto").
+        track = await c.current_track("4efd289d")
+        assert track["title"] == "Candy"
+        assert track["from_ma"] is True
+        assert track["source"] == "stream"
+
+    asyncio.run(scenario())
+
+
 def test_radio_uses_recognition_not_ma_station_name():
     """For radio, MA's title is the station name — must NOT be shown; fall
     through to recognition instead."""
