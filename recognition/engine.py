@@ -18,6 +18,9 @@ from recognition.shazam import ShazamRecognizer
 logger = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_FAILURES = 5
+# Safety net so a hung Shazam/ACRCloud network call can never stall a recognition
+# cycle for minutes. Shazam is normally <3s and the whole chain well under this.
+RECOGNIZE_TIMEOUT = 20.0
 
 
 class LockTracker:
@@ -156,7 +159,12 @@ class PlayerRecognizer:
                 else:
                     # Purely informational — recognition logic is unchanged.
                     level = audio.get_max_amplitude()
-                    result = await self._recognize_once(audio)
+                    try:
+                        result = await asyncio.wait_for(
+                            self._recognize_once(audio), timeout=RECOGNIZE_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        self._log_outcome("timed out after %.0fs", RECOGNIZE_TIMEOUT)
+                        result = None
                     if result is None:
                         hint = " (likely silence)" if level < 100 else ""
                         self._log_outcome("no match (audio level=%d)%s", level, hint)

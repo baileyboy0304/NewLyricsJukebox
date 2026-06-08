@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.13
+
+- **Fix the multi-minute startup stall in recognition.** The first outbound
+  Shazam API call (DNS + internet) could hang for minutes right after boot — the
+  add-on connected to Music Assistant instantly (a LAN IP, no DNS) but the first
+  internet call stalled until connectivity/DNS settled. Symptom: a single
+  recognize() blocked ~5 min, then returned a result for the boot-time audio (a
+  song that had already finished) and everything caught up. Recognition calls
+  now have a 20s timeout, so a startup network hang can't block a cycle; the loop
+  retries and self-heals as soon as the network is ready. (Pairs with the 1.0.12
+  Shazam warmup and per-cycle outcome logging.)
+
 ## 1.0.12
 
 - **Recognition visibility (diagnose "first boot doesn't detect").** The engine
