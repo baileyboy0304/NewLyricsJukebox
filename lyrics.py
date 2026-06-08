@@ -178,17 +178,36 @@ class LyricsService:
             return None
 
     async def fetch(self, artist: str, title: str, album: str = None,
-                    duration: int = None) -> LyricsData:
+                    duration: int = None, on_update=None) -> LyricsData:
         """Look up lyrics for a track. Returns the best selection.
 
         Uses the cache when present; otherwise queries all enabled providers in
-        parallel, persists every result, then runs the two-pass selection.
+        parallel. Results are applied INCREMENTALLY: ``on_update(LyricsData)`` is
+        called each time a provider returns and improves the selection, so the
+        UI can show lyrics from the first fast provider (~1s) without waiting for
+        slow/failing ones (e.g. QQ retrying a 500 for ~25s).
         """
         cached = self._read_db(artist, title)
         if cached and cached.get("saved_lyrics"):
-            return self._select(artist, title, cached)
+            data = self._select(artist, title, cached)
+            if on_update:
+                on_update(data)
+            return data
 
         enabled = [p for p in self.providers if p.enabled]
+        data = LyricsData(artist=artist, title=title)
+
+        def apply(provider_name, line, meta, word):
+            nonlocal data
+            if not (line or word):
+                return
+            self._write_provider(artist, title, provider_name, line, meta, word)
+            db = self._read_db(artist, title) or {
+                "saved_lyrics": {}, "word_synced_lyrics": {}, "metadata": {}}
+            data = self._select(artist, title, db)
+            if on_update:
+                on_update(data)
+
         if FEATURES["parallel_provider_fetch"]:
             # Each task returns (provider, raw) so we don't rely on identifying
             # the originating task (as_completed yields wrappers, not the tasks).
@@ -197,17 +216,14 @@ class LyricsService:
             for fut in asyncio.as_completed(tasks):
                 provider, raw = await fut
                 line, meta, word = _normalize_result(raw)
-                if line or word:
-                    self._write_provider(artist, title, provider.name, line, meta, word)
+                apply(provider.name, line, meta, word)
         else:
             for p in enabled:
                 raw = await self._run_provider(p, artist, title, album, duration)
                 line, meta, word = _normalize_result(raw)
-                if line or word:
-                    self._write_provider(artist, title, p.name, line, meta, word)
+                apply(p.name, line, meta, word)
 
-        db = self._read_db(artist, title) or {"saved_lyrics": {}, "word_synced_lyrics": {}, "metadata": {}}
-        return self._select(artist, title, db)
+        return data
 
     # -- line helpers (for the 3-line view) ------------------------------- #
 
