@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.8
+
+- Add Home Assistant **ingress**: the UI now appears in the sidebar
+  ("Lyrics Jukebox"). Removed `host_network` (it blocks the ingress proxy) now
+  that the real cause of the earlier inaccessibility — the event-loop freeze —
+  is fixed. Ports `9014/tcp` (direct access) and `6056/udp` (audio) stay mapped;
+  player identity comes from the RTP SSRC/extension, so audio works without host
+  networking. Reverts the host_network/firewall churn from 1.0.4/1.0.5.
+
 ## 1.0.7
 
 - Fix `/current-track` 500 (`TypeError: unhashable type: 'PlayerQueue'`): this

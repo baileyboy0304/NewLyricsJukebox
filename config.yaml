@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.7"
+version: "1.0.8"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -8,17 +8,20 @@ arch:
   - aarch64
 startup: application
 boot: auto
-# host_network puts the web UI directly on the host (http://<host>:9014) and
-# lets the add-on receive RTP audio on UDP 6056 with the real source IP. The
-# ports: declaration is what opens these through the Home Assistant OS host
-# firewall, so it is required even with host_network for the port to be
-# reachable from the LAN.
-host_network: true
+# Networking: ingress makes the UI available in the HA sidebar (no host_network,
+# so the Supervisor's ingress proxy can reach the add-on on the internal
+# network). The mapped ports keep direct access (http://<host>:9014) and receive
+# RTP audio on UDP 6056. The audio path identifies players by RTP SSRC/extension,
+# not source IP, so it works fine without host networking.
+ingress: true
+ingress_port: 9014
+panel_icon: mdi:music-note-eighth
+panel_title: Lyrics Jukebox
 ports:
   9014/tcp: 9014
   6056/udp: 6056
 ports_description:
-  9014/tcp: "Web UI"
+  9014/tcp: "Web UI (also available via the sidebar / ingress)"
   6056/udp: "UDP audio input from Music Assistant"
 map:
   - addon_config:rw
