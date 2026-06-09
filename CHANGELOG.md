@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.29
+
+- **Fade the screen between songs.** On a stream, when a song ends and recognition
+  stops matching (adverts / DJ talk / silence), the recognizer now drops its held
+  result instead of leaving the finished track on screen. The UI fades the
+  artwork, artist/title and lyrics away — leaving just the transport controls —
+  and fades back up when the next song is recognised.
+- **New option `blank_after_failures` (default `1`).** Number of consecutive
+  failed recognitions before the metadata is cleared. Default `1` blanks the
+  screen immediately when a song ends; raise it to ride out brief mid-song
+  recognition glitches before fading.
+- **Selecting a player gives immediate feedback.** The chip is updated the moment
+  a player is chosen, and on every poll — even while a stream is still being
+  recognised (`title=None`). Previously the poll bailed out before updating the
+  chip whenever no track was identified yet, so picking a radio player that hadn't
+  matched looked like nothing happened.
+
 ## 1.0.28
 
 - **Transport controls now use Music Assistant's exact icons.** MA's player uses
@@ -12,16 +29,6 @@
   hex key (e.g. `73D34824`). It now borrows the friendly name of a sibling stream
   on the same device (matching `source_ip` / `ma_player_id`), so it shows e.g.
   `respeaker_lyrics`.
-- **Selecting a player gives immediate feedback.** The chip is updated the moment
-  a player is chosen, and on every poll — even while a stream is still being
-  recognised (`title=None`). Previously the poll bailed out before updating the
-  chip whenever no track was identified yet, so picking a radio player that hadn't
-  matched looked like nothing happened.
-- **Fade the screen between songs.** On a stream, when a song ends and recognition
-  stops matching (adverts / DJ talk / silence), the recognizer now drops its held
-  result instead of leaving the finished track on screen. The UI fades the
-  artwork, artist/title and lyrics away — leaving just the transport controls —
-  and fades back up when the next song is recognised.
 
 ## 1.0.27
 
