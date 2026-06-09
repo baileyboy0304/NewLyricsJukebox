@@ -1,6 +1,16 @@
 # Changelog
 
-## 1.0.29
+## 1.0.30
+
+- **Fix duplicate recognition + wrong lyrics (two recognizers for one player).**
+  The browser polls `current-track` ~10×/s, so `_set_active_recognizer` raced
+  itself: its stop step awaits, and a concurrent poll could create a recognizer in
+  that window, leaving **two** recognizer loops running for one speaker. With the
+  respeaker reconnecting under a new RTP SSRC (two "active" streams for one
+  device), the orphan was never stopped — so every recognition and lyric line was
+  emitted twice and the two loops fought, scrambling the synced position. Recognizer
+  start/stop is now serialized under a lock, so exactly one recognizer ever runs
+  per player. Added a concurrency regression test.
 
 - **Fade the screen between songs.** On a stream, when a song ends and recognition
   stops matching (adverts / DJ talk / silence), the recognizer now drops its held

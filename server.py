@@ -41,6 +41,10 @@ class Controller:
         self.capture = capture
         self.lyrics_service = LyricsService()
         self.recognizers: Dict[str, "object"] = {}
+        # Serializes recognizer start/stop so overlapping current-track polls can't
+        # interleave mid-swap and leave two recognizers running for one player
+        # (the browser polls ~10x/s, so _set_active_recognizer races itself).
+        self._rec_lock = asyncio.Lock()
         self.runtimes: Dict[str, PlayerRuntime] = {}
         # display-name overrides set via the rename UI
         self.renames: Dict[str, str] = {}
@@ -199,28 +203,34 @@ class Controller:
     async def _set_active_recognizer(self, stream_key):
         """Run AT MOST ONE recognizer — for the currently selected stream. Any
         recognizer for a different (often stale, new-SSRC) stream is stopped, so
-        we don't pile up recognizers all hammering Shazam in parallel."""
-        for key in list(self.recognizers):
-            if key != stream_key:
+        we don't pile up recognizers all hammering Shazam in parallel.
+
+        Held under ``_rec_lock``: the stop step awaits, and without the lock a
+        concurrent poll could create a recognizer in that window, leaving two
+        running for one player (the duplicate-everything bug)."""
+        async with self._rec_lock:
+            for key in list(self.recognizers):
+                if key != stream_key:
+                    rec = self.recognizers.pop(key)
+                    await rec.stop()
+                    logger.info("Stopped recognizer for stream %s", key)
+            if not stream_key or not self.capture:
+                return None
+            rec = self.recognizers.get(stream_key)
+            if rec is None:
+                from recognition.engine import PlayerRecognizer
+                rec = PlayerRecognizer(stream_key, self.capture)
+                rec.start()
+                self.recognizers[stream_key] = rec
+                logger.info("Started recognizer for stream %s", stream_key)
+            return rec
+
+    async def _stop_all_recognizers(self):
+        async with self._rec_lock:
+            for key in list(self.recognizers):
                 rec = self.recognizers.pop(key)
                 await rec.stop()
                 logger.info("Stopped recognizer for stream %s", key)
-        if not stream_key or not self.capture:
-            return None
-        rec = self.recognizers.get(stream_key)
-        if rec is None:
-            from recognition.engine import PlayerRecognizer
-            rec = PlayerRecognizer(stream_key, self.capture)
-            rec.start()
-            self.recognizers[stream_key] = rec
-            logger.info("Started recognizer for stream %s", stream_key)
-        return rec
-
-    async def _stop_all_recognizers(self):
-        for key in list(self.recognizers):
-            rec = self.recognizers.pop(key)
-            await rec.stop()
-            logger.info("Stopped recognizer for stream %s", key)
 
     # -- current track ----------------------------------------------------- #
 
