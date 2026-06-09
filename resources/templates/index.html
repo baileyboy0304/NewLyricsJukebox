@@ -35,24 +35,34 @@
       <input id="scrub" class="scrub" type="range" min="0" max="100" value="0" />
       <span id="time-dur" class="time">0:00</span>
     </div>
-    <div class="controls">
-      <button id="btn-prev" class="ctrl-btn" title="Previous">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z" />
-          <path d="M3 20V4" />
-        </svg>
-      </button>
-      <button id="btn-playpause" class="ctrl-btn ctrl-main" title="Play/Pause">
-        <svg id="playpause-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />
-        </svg>
-      </button>
-      <button id="btn-next" class="ctrl-btn" title="Next">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M21 4v16" />
-          <path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z" />
-        </svg>
-      </button>
+    <div class="controls-row">
+      <div class="controls">
+        <button id="btn-prev" class="ctrl-btn" title="Previous">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z" />
+            <path d="M3 20V4" />
+          </svg>
+        </button>
+        <button id="btn-playpause" class="ctrl-btn ctrl-main" title="Play/Pause">
+          <svg id="playpause-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />
+          </svg>
+        </button>
+        <button id="btn-next" class="ctrl-btn" title="Next">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 4v16" />
+            <path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z" />
+          </svg>
+        </button>
+      </div>
+      <div id="provider-cycle" class="provider-cycle">
+        <button id="btn-prov-prev" class="prov-btn" title="Previous lyrics provider">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button id="btn-prov-next" class="prov-btn" title="Next lyrics provider">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
+        </button>
+      </div>
     </div>
     <div class="speaker-bar">
       <button id="btn-players" class="speaker-chip" title="Select player">

@@ -102,12 +102,55 @@ body {
 .scrub:disabled { opacity: 0.4; }
 .time { font-size: 0.8rem; color: var(--muted); width: 3rem; text-align: center; }
 
+/* Transport row: controls centred, the lyrics-provider +/- pinned to the right
+   and vertically aligned with them. */
+.controls-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .controls {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 2rem;
 }
+
+/* Lyrics-provider cycle: same Lucide stroke style as transport, ~25% smaller. */
+.provider-cycle {
+  position: absolute;
+  right: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prov-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.prov-btn svg {
+  width: 22px;          /* 25% smaller than the 30px transport icons */
+  height: 22px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.15s ease;
+}
+
+.prov-btn:hover svg { stroke: var(--accent); }
+.provider-cycle.hidden { display: none; }
 
 .ctrl-btn {
   display: inline-flex;

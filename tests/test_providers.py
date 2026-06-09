@@ -118,3 +118,28 @@ def test_lines_around_before_start():
     data = LyricsData(artist="A", title="B", line_synced=[(5.0, "first")])
     around = LyricsService.lines_around(data, 1.0)
     assert around["current"] == ""
+
+
+def test_provider_names_in_ordered_by_priority():
+    """The +/- cycle lists every provider that returned lyrics, by priority."""
+    svc = service()
+    db = {"saved_lyrics": {"qq": [[0.0, "q"]], "lrclib": [[0.0, "l"]],
+                           "spotify": [[0.0, "s"]]}}
+    # spotify(1) < lrclib(2) < qq(5)
+    assert svc.provider_names_in(db) == ["spotify", "lrclib", "qq"]
+    assert svc.provider_names_in({}) == []
+
+
+def test_lyrics_for_provider_picks_that_provider():
+    """Cycling to a provider serves exactly that provider's lyrics/metadata."""
+    svc = service()
+    db = {
+        "saved_lyrics": {"lrclib": [[0.0, "lrclib line"]],
+                         "netease": [[1.0, "netease line"]]},
+        "metadata": {"netease": {"is_instrumental": False}},
+        "word_synced_lyrics": {},
+    }
+    data = svc.lyrics_for_provider("A", "B", db, "netease")
+    assert data.line_provider == "netease"
+    assert data.line_synced == [(1.0, "netease line")]
+    assert svc.lyrics_for_provider("A", "B", db, "qq") is None

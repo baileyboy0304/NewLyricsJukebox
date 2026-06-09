@@ -91,6 +91,38 @@ class LyricsService:
             except (OSError, ValueError):
                 return None
 
+    def read_db(self, artist: str, title: str) -> Optional[dict]:
+        """Public read of the per-song DB (used by the controller to expose the
+        set of providers that returned lyrics, for the +/- provider cycle)."""
+        return self._read_db(artist, title)
+
+    # -- provider cycling (manual +/- selection) -------------------------- #
+
+    def provider_names_in(self, db: dict) -> List[str]:
+        """Providers that have line-synced lyrics in this song's DB, ordered by
+        priority — the list the UI cycles through."""
+        saved = (db or {}).get("saved_lyrics", {})
+        return [p.name for p in self.providers if p.name in saved]
+
+    def lyrics_for_provider(self, artist: str, title: str, db: dict,
+                            provider: str) -> Optional[LyricsData]:
+        """Build LyricsData for ONE specific provider from the song's DB (so the
+        user can step through each provider's lyrics), or None if absent."""
+        saved = (db or {}).get("saved_lyrics", {})
+        if provider not in saved:
+            return None
+        data = LyricsData(artist=artist, title=title)
+        data.line_synced = [tuple(x) for x in saved[provider]]
+        data.line_provider = provider
+        meta = (db.get("metadata") or {}).get(provider, {})
+        data.is_instrumental = bool(meta.get("is_instrumental"))
+        data.plain = meta.get("plain_lyrics")
+        ws = (db.get("word_synced_lyrics") or {}).get(provider)
+        if ws:
+            data.word_synced = ws
+            data.word_provider = provider
+        return data
+
     def _write_provider(self, artist, title, provider, line, meta, word):
         if not FEATURES["save_lyrics_locally"]:
             return
@@ -165,17 +197,29 @@ class LyricsService:
     # -- fetch ------------------------------------------------------------- #
 
     async def _run_named(self, provider, artist, title, album, duration):
-        raw = await self._run_provider(provider, artist, title, album, duration)
-        return provider, raw
+        raw, err = await self._run_provider(provider, artist, title, album, duration)
+        return provider, raw, err
 
     async def _run_provider(self, provider, artist, title, album, duration):
+        """Run one provider, returning (raw_result, error). The error is surfaced
+        (not swallowed) so the caller can log per-provider failures."""
         try:
             if asyncio.iscoroutinefunction(provider.get_lyrics):
-                return await provider.get_lyrics(artist, title, album, duration)
-            return await asyncio.to_thread(provider.get_lyrics, artist, title, album, duration)
+                return await provider.get_lyrics(artist, title, album, duration), None
+            return await asyncio.to_thread(provider.get_lyrics, artist, title, album, duration), None
         except Exception as exc:  # noqa: BLE001
-            logger.debug("Provider %s failed: %s", provider.name, exc)
-            return None
+            return None, exc
+
+    @staticmethod
+    def _log_provider_outcome(name, artist, title, line, word, err):
+        """One INFO line per provider so failures/empties are visible in the log."""
+        if err is not None:
+            logger.info("lyrics-provider %s ERROR for %s - %s: %s", name, artist, title, err)
+        elif line or word:
+            logger.info("lyrics-provider %s OK for %s - %s (%d lines%s)",
+                        name, artist, title, len(line), ", word-sync" if word else "")
+        else:
+            logger.info("lyrics-provider %s no lyrics for %s - %s", name, artist, title)
 
     async def fetch(self, artist: str, title: str, album: str = None,
                     duration: int = None, on_update=None) -> LyricsData:
@@ -214,13 +258,15 @@ class LyricsService:
             tasks = [asyncio.create_task(self._run_named(p, artist, title, album, duration))
                      for p in enabled]
             for fut in asyncio.as_completed(tasks):
-                provider, raw = await fut
+                provider, raw, err = await fut
                 line, meta, word = _normalize_result(raw)
+                self._log_provider_outcome(provider.name, artist, title, line, word, err)
                 apply(provider.name, line, meta, word)
         else:
             for p in enabled:
-                raw = await self._run_provider(p, artist, title, album, duration)
+                raw, err = await self._run_provider(p, artist, title, album, duration)
                 line, meta, word = _normalize_result(raw)
+                self._log_provider_outcome(p.name, artist, title, line, word, err)
                 apply(p.name, line, meta, word)
 
         return data
