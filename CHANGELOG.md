@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.34
+
+- **Cycle lyrics providers from the UI.** Added `+` / `−` buttons on the right of
+  the transport row (same Lucide stroke style, 25% smaller) that step through
+  every provider that returned lyrics for the current song. The lyrics and the
+  "via …" label update live to show the chosen source. The buttons appear only
+  when more than one provider has lyrics, and the choice resets to the
+  auto-selected best on each new song. New `/lyrics` returns a `providers` list
+  and accepts `?provider=` to serve a specific one.
+- **Per-provider lyrics logging.** Each provider's outcome is now logged
+  (`lyrics-provider <name> OK/ERROR/no lyrics for <artist> - <title>`), so failed
+  or empty fetches are visible.
+
 ## 1.0.33
 
 - **Grouped the options by category.** Each setting's name is now prefixed with

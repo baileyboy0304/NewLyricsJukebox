@@ -29,6 +29,7 @@ class PlayerRuntime:
     track: dict = field(default_factory=dict)
     lyrics: Optional[LyricsData] = None
     lyrics_key: Optional[str] = None  # "artist|title" the lyrics belong to
+    lyrics_db: Optional[dict] = None  # per-song DB (all providers) for +/- cycling
     lyrics_task: object = None        # background fetch task for the current track
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
@@ -387,6 +388,10 @@ class Controller:
         def on_update(data):
             if runtime.lyrics_key == lyrics_key:   # ignore if track changed
                 runtime.lyrics = data
+                # Refresh the per-song DB so /lyrics can list every provider that
+                # returned (for the +/- cycle). Fires only when a provider lands,
+                # not per poll, so the disk read is cheap.
+                runtime.lyrics_db = self.lyrics_service.read_db(artist, title)
         try:
             await self.lyrics_service.fetch(artist, title, album, duration, on_update=on_update)
         except asyncio.CancelledError:
@@ -402,7 +407,7 @@ class Controller:
             runtime.log_line = line
             logger.info("lyric-line player=%s pos=%.1fs current=%r", name, position, line)
 
-    async def lyrics(self, param: Optional[str]) -> dict:
+    async def lyrics(self, param: Optional[str], provider: Optional[str] = None) -> dict:
         key, _, _, name = self._resolve(param)
         runtime = self.runtimes.get(key)
         if runtime is None or not runtime.track.get("title"):
@@ -419,6 +424,7 @@ class Controller:
         if runtime.lyrics_key != lyrics_key:
             runtime.lyrics_key = lyrics_key
             runtime.lyrics = None
+            runtime.lyrics_db = None
             if runtime.lyrics_task and not runtime.lyrics_task.done():
                 runtime.lyrics_task.cancel()
             runtime.lyrics_task = asyncio.create_task(self._fetch_lyrics_bg(
@@ -431,6 +437,15 @@ class Controller:
         if data is None:
             return self._empty_lyrics(track_id, pending=True)
 
+        # Providers that returned lyrics for this song — the list the +/- buttons
+        # cycle through. If the user picked a specific one, serve its lyrics.
+        providers = self.lyrics_service.provider_names_in(runtime.lyrics_db or {})
+        if provider and provider in providers:
+            chosen = self.lyrics_service.lyrics_for_provider(
+                artist, title, runtime.lyrics_db, provider)
+            if chosen is not None:
+                data = chosen
+
         position = runtime.track.get("position", 0.0)
         lines = LyricsService.lines_around(data, position)
         self._log_line(runtime, name, position, lines.get("current", ""))
@@ -439,6 +454,7 @@ class Controller:
             "has_lyrics": data.has_lyrics,
             "is_instrumental": data.is_instrumental,
             "provider": data.line_provider,
+            "providers": providers,
             "word_sync_provider": data.word_provider,
             "has_word_sync": data.has_word_sync,
             "pending": False,
@@ -495,7 +511,8 @@ def create_app(controller: Controller) -> Quart:
 
     @app.route("/lyrics")
     async def lyrics_route():
-        return jsonify(await controller.lyrics(request.args.get("player")))
+        return jsonify(await controller.lyrics(
+            request.args.get("player"), request.args.get("provider")))
 
     @app.route("/transport", methods=["POST"])
     async def transport():

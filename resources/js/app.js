@@ -19,6 +19,9 @@ let lastIsPlaying = null;
 let seekable = false;
 let durationMs = null;
 let isScrubbing = false;
+let lyricProviders = [];         // providers that returned lyrics for this song
+let currentLyricProvider = null; // provider currently shown
+let chosenProvider = null;       // user pick via +/- (null = auto best)
 
 // ---------- console logging (compare timing with the add-on log) ----------
 // Logs use wall-clock HH:MM:SS.mmm to line up with the server's timestamps.
@@ -78,6 +81,9 @@ async function pollTrack() {
     currentLines = [];
     lyricStatus = '…';            // loading until lyrics arrive
     lastActiveIdx = -2;
+    chosenProvider = null;        // new song -> back to the auto-selected provider
+    lyricProviders = [];
+    currentLyricProvider = null;
     flywheel.reset();
     nljLog('metadata', {
       title: data.title, artist: data.artist, source: data.source,
@@ -105,7 +111,11 @@ async function pollTrack() {
 }
 
 async function pollLyrics() {
-  const data = await fetchJSON(withPlayer('lyrics'));
+  let url = withPlayer('lyrics');
+  if (chosenProvider) {
+    url += (url.includes('?') ? '&' : '?') + 'provider=' + encodeURIComponent(chosenProvider);
+  }
+  const data = await fetchJSON(url);
   if (!data) return;
   if (data.track_id && data.track_id !== currentTrackId) return; // stale
   const lines = data.line_synced || [];
@@ -120,6 +130,9 @@ async function pollLyrics() {
   } else {
     lyricStatus = '';            // no lyrics found -> blank (stale already cleared)
   }
+  lyricProviders = data.providers || [];
+  currentLyricProvider = data.provider || null;
+  updateProviderCycle();
   $('provider').textContent = data.provider ? `via ${data.provider}` : '';
   // Log only when the lyric availability actually changes, not every poll.
   if (!!had !== !!lines.length || lines.length === 0) {
@@ -240,6 +253,26 @@ function resetProgress() {
   }
 }
 
+// ---------- lyrics-provider cycle (+ / -) ----------
+
+// Show the +/- buttons only when there's more than one provider to switch between.
+function updateProviderCycle() {
+  $('provider-cycle').classList.toggle('hidden', lyricProviders.length < 2);
+}
+
+function cycleProvider(dir) {
+  if (lyricProviders.length < 2) return;
+  let idx = lyricProviders.indexOf(chosenProvider || currentLyricProvider);
+  if (idx < 0) idx = 0;
+  idx = (idx + dir + lyricProviders.length) % lyricProviders.length;
+  chosenProvider = lyricProviders[idx];
+  nljLog('provider-pick', { provider: chosenProvider, of: lyricProviders });
+  if (!window._fetchingLyrics) {              // refresh immediately, don't wait a poll
+    window._fetchingLyrics = true;
+    pollLyrics().finally(() => { window._fetchingLyrics = false; });
+  }
+}
+
 // ---------- transport ----------
 
 async function transport(action, extra) {
@@ -349,6 +382,8 @@ function selectPlayer(key, name) {
 function init() {
   nljLog('app started', { version: window.NLJ_VERSION || 'unknown', player: selectedPlayer || 'auto' });
   wireTransport();
+  $('btn-prov-prev').onclick = () => cycleProvider(-1);
+  $('btn-prov-next').onclick = () => cycleProvider(1);
   $('btn-players').onclick = openPlayerModal;
   $('player-modal').onclick = (e) => {
     if (e.target.id === 'player-modal') e.target.classList.remove('open');

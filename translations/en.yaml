@@ -97,7 +97,9 @@ configuration:
     name: Lyrics provider — Spotify
     description: >-
       Fetch time-synced lyrics from Spotify — often the best line/word-synced
-      quality. Highest priority. No Spotify credentials needed.
+      quality. Highest priority. Requires the Spotify client ID + secret above
+      and a one-time sign-in; without them this provider returns nothing and the
+      others are used.
   provider_lrclib:
     name: Lyrics provider — LRCLIB
     description: Fetch synced lyrics from the free, open LRCLIB database.
