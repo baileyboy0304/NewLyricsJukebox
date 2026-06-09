@@ -128,6 +128,9 @@ MUSIC_ASSISTANT = {
 
 UDP_AUDIO = {
     "enabled": _as_bool(conf("recognition_enabled", True), True),
+    # The single UDP-port setting the user sees (grouped with the other UDP
+    # options). If changed, the matching `6056/udp` host mapping in the add-on's
+    # Network config must be updated too so the forwarded port reaches this bind.
     "port": _as_int(conf("udp_listen_port", 6056), 6056),
     "sample_rate": _as_int(conf("udp_audio_sample_rate", 16000), 16000),
     "channels": 1,

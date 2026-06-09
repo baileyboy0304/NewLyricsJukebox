@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.32
+
+- **Friendly option names + descriptions in the add-on UI.** Added
+  `translations/en.yaml` so every setting shows a plain-English name and an
+  explanation instead of the raw key — e.g. `blank_after_failures` now reads
+  "Fade lyrics after N failed recognitions". Options are reordered in
+  `config.yaml` into logical groups (Music Assistant, recognition engine, cloud
+  APIs, lyrics providers, general). Note: HA add-on options forms don't support
+  section headings, so grouping is by order + clear labels, not dividers.
+- **Grouped the UDP audio port with the other UDP settings.** `udp_listen_port`
+  now sits next to the sample-rate and jitter options (and has a friendly name +
+  description), so the UDP port is a single setting in one place.
+
 ## 1.0.31
 
 - **Removed the redundant `server_port` option — the web UI port is now fixed at
