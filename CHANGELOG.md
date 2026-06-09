@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.33
+
+- **Grouped the options by category.** Each setting's name is now prefixed with
+  its group — **Music Assistant —**, **Recognition —**, **UDP audio —**,
+  **Cloud API —**, **Lyrics provider —**, **General —** — and the options are
+  ordered to match, so they cluster visually. (HA add-on forms have no real
+  section-heading construct, so this prefix approach is the closest available.)
+- **UDP port is no longer listed twice.** `udp_listen_port` has been removed from
+  Options — the UDP audio port's single home is the `6056/udp` row in the add-on's
+  Network panel (the host side is the editable knob), exactly like the web port.
+  The app's bind stays 6056 to match the mapping's container side.
+
 ## 1.0.32
 
 - **Friendly option names + descriptions in the add-on UI.** Added
