@@ -64,6 +64,9 @@ async function fetchJSON(url, options) {
 
 async function pollTrack() {
   const data = await fetchJSON(withPlayer('current-track'));
+  // Reflect the resolved player in the chip even while recognising (title=None),
+  // otherwise selecting a player on a not-yet-identified stream looks like a no-op.
+  if (data && data.player) updateSpeakerName(data.player);
   if (!data || !data.title) {
     flywheel.isPlaying = false;
     return false;
@@ -97,7 +100,6 @@ async function pollTrack() {
   else { art.style.visibility = 'hidden'; }
 
   updatePlayPause(data.is_playing);
-  updateSpeakerName(data.player);
   $('scrub').disabled = !seekable;
   return true;
 }
@@ -294,7 +296,7 @@ function playerRow(p, isAuto, unassigned) {
   const use = document.createElement('button');
   use.className = 'use-btn';
   use.textContent = 'Use';
-  use.onclick = () => selectPlayer(isAuto ? null : p.key);
+  use.onclick = () => selectPlayer(isAuto ? null : p.key, isAuto ? null : p.name);
   row.appendChild(use);
   return row;
 }
@@ -311,10 +313,12 @@ async function doRename(key, current) {
   }
 }
 
-function selectPlayer(key) {
+function selectPlayer(key, name) {
   selectedPlayer = key;
   if (key) localStorage.setItem('selectedPlayer', key);
   else localStorage.removeItem('selectedPlayer');
+  // Immediate feedback; the next poll confirms the server-resolved name.
+  updateSpeakerName(name);
   $('player-modal').classList.remove('open');
   currentTrackId = null;
   flywheel.reset();

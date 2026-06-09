@@ -12,6 +12,11 @@
   hex key (e.g. `73D34824`). It now borrows the friendly name of a sibling stream
   on the same device (matching `source_ip` / `ma_player_id`), so it shows e.g.
   `respeaker_lyrics`.
+- **Selecting a player gives immediate feedback.** The chip is updated the moment
+  a player is chosen, and on every poll — even while a stream is still being
+  recognised (`title=None`). Previously the poll bailed out before updating the
+  chip whenever no track was identified yet, so picking a radio player that hadn't
+  matched looked like nothing happened.
 
 ## 1.0.27
 
