@@ -204,11 +204,14 @@ function fmt(sec) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-const ICON_PLAY = 'M8,5.14V19.14L19,12.14L8,5.14Z';
-const ICON_PAUSE = 'M14,19H18V5H14M6,19H10V5H6V19Z';
+// Lucide icon geometry (matches Music Assistant's lucide-vue-next icons).
+const ICON_PLAY =
+  '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />';
+const ICON_PAUSE =
+  '<rect x="14" y="3" width="5" height="18" rx="1" /><rect x="5" y="3" width="5" height="18" rx="1" />';
 
 function updatePlayPause(isPlaying) {
-  $('playpause-path').setAttribute('d', isPlaying ? ICON_PAUSE : ICON_PLAY);
+  $('playpause-icon').innerHTML = isPlaying ? ICON_PAUSE : ICON_PLAY;
 }
 
 function updateSpeakerName(name) {

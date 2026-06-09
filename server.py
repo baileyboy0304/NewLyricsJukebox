@@ -85,6 +85,35 @@ class Controller:
             "ma_players": ma_players,
         }
 
+    def _friendly_name(self, key: str, name: Optional[str]) -> str:
+        """Best display name for a player/stream — never the raw SSRC key.
+
+        Renames win; then the stream's own MA name. When a stream carries no name
+        (e.g. the respeaker reconnected with a fresh SSRC and skipped the name
+        extension) we borrow the friendly name of a sibling stream on the same
+        device (same source_ip / ma_player_id) so the UI shows e.g.
+        "respeaker_lyrics" instead of "73D34824"."""
+        if key in self.renames:
+            return self.renames[key]
+        if name and name in self.renames:
+            return self.renames[name]
+        if name and name != key:
+            return name
+        if self.capture:
+            this = self.capture.get_stream(key)
+            if this:
+                for s in self.capture.list_streams():
+                    sname = s.get("name")
+                    if not sname:
+                        continue
+                    same_device = (
+                        (this.source_ip and s.get("source_ip") == this.source_ip)
+                        or (this.ma_player_id and s.get("ma_player_id") == this.ma_player_id)
+                    )
+                    if same_device:
+                        return self.renames.get(sname, sname)
+        return name or key
+
     def _resolve(self, param: Optional[str]):
         """Resolve a ?player= value to (key, ma_player_id, stream_key, name)."""
         if not param or param == "auto":
@@ -227,6 +256,7 @@ class Controller:
 
     async def current_track(self, param: Optional[str]) -> dict:
         key, ma_id, stream_key, name = self._resolve(param)
+        name = self._friendly_name(key, name)
         runtime = self.runtimes.setdefault(key, PlayerRuntime(key=key))
 
         state: Optional[PlayerState] = None
@@ -243,6 +273,7 @@ class Controller:
             live = self.capture.first_active_stream()
             if live is not None and live.ma_player_id and live.ma_player_id != ma_id:
                 ma_id, stream_key = live.ma_player_id, live.key
+                name = self._friendly_name(live.key, live.name)
                 if self.ma and self.ma.connected:
                     state = await self.ma.get_player_state(ma_id)
 
