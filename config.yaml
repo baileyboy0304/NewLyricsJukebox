@@ -38,6 +38,7 @@ options:
   music_assistant_player_id: ""
   # --- Recognition engine (UDP audio -> Shazam/ACRCloud) ---
   recognition_enabled: true
+  udp_listen_port: 6056
   udp_audio_sample_rate: 16000
   udp_jitter_buffer_ms: 60
   capture_duration: 6.0
@@ -68,6 +69,7 @@ schema:
   music_assistant_token: str?
   music_assistant_player_id: str?
   recognition_enabled: bool
+  udp_listen_port: port
   udp_audio_sample_rate: "int(8000,48000)"
   udp_jitter_buffer_ms: "int(0,500)"
   capture_duration: "float(1.0,15.0)"

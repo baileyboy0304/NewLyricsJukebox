@@ -26,6 +26,11 @@ configuration:
       Turn on the UDP-audio + Shazam/ACRCloud pipeline used to identify radio and
       other live streams. Turn off to show lyrics only for sources playing through
       the Music Assistant queue (Spotify, local files) via their metadata.
+  udp_listen_port:
+    name: UDP audio port
+    description: >-
+      Port the add-on listens on for Music Assistant's RTP audio. If you change
+      it, set the same value on the 6056/udp host mapping in the Network panel.
   udp_audio_sample_rate:
     name: UDP audio sample rate (Hz)
     description: >-

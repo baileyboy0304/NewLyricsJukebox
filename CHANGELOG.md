@@ -9,11 +9,9 @@
   `config.yaml` into logical groups (Music Assistant, recognition engine, cloud
   APIs, lyrics providers, general). Note: HA add-on options forms don't support
   section headings, so grouping is by order + clear labels, not dividers.
-- **Removed the redundant `udp_listen_port` option — the UDP audio port is now
-  fixed at 6056.** Same footgun as `server_port`: it was the internal bind that
-  had to match the static `6056/udp` `ports` mapping. To receive audio on a
-  different host port, change the host side of that mapping in the add-on's
-  Network config.
+- **Grouped the UDP audio port with the other UDP settings.** `udp_listen_port`
+  now sits next to the sample-rate and jitter options (and has a friendly name +
+  description), so the UDP port is a single setting in one place.
 
 ## 1.0.31
 
