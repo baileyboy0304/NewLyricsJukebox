@@ -99,9 +99,15 @@ for _d in (DATABASE_DIR, CACHE_DIR, STATE_DIR):
 # Server
 # --------------------------------------------------------------------------- #
 
+# The web UI port is FIXED at 9014 to match the add-on's ingress_port and the
+# container port in config.yaml. It is intentionally NOT a user option: ingress_port
+# is static YAML and can't follow an option, so changing only the internal bind would
+# silently break the HA sidebar/ingress (it always targets 9014). To expose direct
+# access on a different HOST port, change the host side of the `ports:` mapping in
+# config.yaml. The env override below exists only for local development.
 SERVER = {
     "host": conf("server_host", "0.0.0.0"),
-    "port": _as_int(conf("server_port", 9014), 9014),
+    "port": _as_int(os.getenv("SERVER_PORT", "9014"), 9014),
 }
 
 LOG_LEVEL = conf("log_level", "INFO")

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.31
+
+- **Removed the redundant `server_port` option — the web UI port is now fixed at
+  9014.** The port lived in three places (`ingress_port`, the `ports` mapping, and
+  the `server_port` option) that all had to agree. Setting only `server_port`
+  (e.g. to 9015) moved the app's bind but not `ingress_port`, so the HA
+  sidebar/ingress kept hitting 9014, no request reached the app, and recognition
+  (which starts on the first UI poll) never ran — the log looked stuck. The
+  internal bind is now pinned to 9014 to match `ingress_port`; to expose direct
+  access on a different host port, change only the host side of the `ports:`
+  mapping. (For a HA add-on `ingress_port` is static YAML and can't follow an
+  option, so a single user-editable web port isn't possible.)
+
 ## 1.0.30
 
 - **Fix duplicate recognition + wrong lyrics (two recognizers for one player).**

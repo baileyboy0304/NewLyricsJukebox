@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.30"
+version: "1.0.31"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -13,6 +13,11 @@ boot: auto
 # network). The mapped ports keep direct access (http://<host>:9014) and receive
 # RTP audio on UDP 6056. The audio path identifies players by RTP SSRC/extension,
 # not source IP, so it works fine without host networking.
+#
+# The web UI port (9014) is fixed: ingress_port, the container side of the ports
+# mapping below, and the app's internal bind must all agree, so there is NO
+# server_port option. To change the DIRECT-access port only, edit the HOST side of
+# the mapping, e.g. `9014/tcp: 8080` (left = container 9014, right = host port).
 ingress: true
 ingress_port: 9014
 panel_icon: mdi:music-note-eighth
@@ -30,7 +35,6 @@ options:
   music_assistant_base_url: ""
   music_assistant_token: ""
   music_assistant_player_id: ""
-  server_port: 9014
   recognition_enabled: true
   udp_listen_port: 6056
   udp_audio_sample_rate: 16000
@@ -59,7 +63,6 @@ schema:
   music_assistant_base_url: str?
   music_assistant_token: str?
   music_assistant_player_id: str?
-  server_port: port
   recognition_enabled: bool
   udp_listen_port: port
   udp_audio_sample_rate: "int(8000,48000)"
