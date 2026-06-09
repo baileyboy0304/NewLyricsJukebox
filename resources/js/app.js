@@ -97,6 +97,7 @@ async function pollTrack() {
   else { art.style.visibility = 'hidden'; }
 
   updatePlayPause(data.is_playing);
+  updateSpeakerName(data.player);
   $('scrub').disabled = !seekable;
   return true;
 }
@@ -203,8 +204,15 @@ function fmt(sec) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+const ICON_PLAY = 'M8,5.14V19.14L19,12.14L8,5.14Z';
+const ICON_PAUSE = 'M14,19H18V5H14M6,19H10V5H6V19Z';
+
 function updatePlayPause(isPlaying) {
-  $('btn-playpause').textContent = isPlaying ? '⏸' : '▶';
+  $('playpause-path').setAttribute('d', isPlaying ? ICON_PAUSE : ICON_PLAY);
+}
+
+function updateSpeakerName(name) {
+  $('speaker-name').textContent = name || 'Select player';
 }
 
 // ---------- transport ----------
