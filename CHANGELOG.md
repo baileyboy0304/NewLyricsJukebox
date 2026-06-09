@@ -1,14 +1,25 @@
 # Changelog
 
+## 1.0.28
+
+- **Transport controls now use Music Assistant's exact icons.** MA's player uses
+  the **Lucide** icon set (`SkipBack` / `Play` / `Pause` / `SkipForward`) — thin
+  outline/stroke glyphs — not the filled Material Design Icons shipped in 1.0.27.
+  Swapped our SVGs for the exact Lucide geometry and stroke styling so the
+  controls match MA. The existing dark theme and accent colour are unchanged.
+- **The player chip shows the friendly name, not the raw SSRC.** When a stream
+  arrives with a fresh SSRC and no name extension, the chip used to display the
+  hex key (e.g. `73D34824`). It now borrows the friendly name of a sibling stream
+  on the same device (matching `source_ip` / `ma_player_id`), so it shows e.g.
+  `respeaker_lyrics`.
+
 ## 1.0.27
 
-- **Transport controls and the player picker now use the Music Assistant icon
-  style.** Swapped the emoji glyphs for the same Material Design Icons MA uses
-  (`skip-previous` / `play` / `pause` / `skip-next`) as crisp SVGs, and moved the
+- **Transport controls and the player picker restyled to the Music Assistant
+  player.** Replaced the emoji glyphs with crisp SVG icons and moved the
   speaker/player selector into a rounded chip below the controls that shows the
-  current player name (à la MA's speaker chip). The existing dark theme and accent
-  colour are unchanged, as is the functionality — previous / play-pause / next /
-  seek — so no non-working buttons were added.
+  current player name (à la MA's speaker chip). The dark theme, accent colour, and
+  functionality (previous / play-pause / next / seek) are unchanged.
 
 ## 1.0.26
 

@@ -115,14 +115,19 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Lucide icons are stroke-based outlines (fill:none), matching Music Assistant. */
 .ctrl-btn svg {
   width: 30px;
   height: 30px;
-  fill: var(--fg);
-  transition: fill 0.15s ease;
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.15s ease;
 }
 
-.ctrl-btn:not(.ctrl-main):hover svg { fill: var(--accent); }
+.ctrl-btn:not(.ctrl-main):hover svg { stroke: var(--accent); }
 
 .ctrl-main {
   width: 64px;
@@ -136,9 +141,10 @@ body {
 .ctrl-main:active { transform: scale(0.94); }
 
 .ctrl-main svg {
-  width: 30px;
-  height: 30px;
-  fill: #fff;
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: #fff;
 }
 
 /* Speaker / player-select chip — mirrors the Music Assistant player. */
