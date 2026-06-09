@@ -393,6 +393,29 @@ def test_only_one_recognizer_runs_at_a_time():
     asyncio.run(scenario())
 
 
+def test_concurrent_swaps_never_leave_two_recognizers():
+    """Regression: the browser polls current-track ~10x/s, so
+    _set_active_recognizer races itself. Without serialization a concurrent poll
+    could create a recognizer in the window where another is mid-stop, leaving two
+    running for one player (the duplicate recognition/lyrics bug). Many overlapping
+    swaps must still collapse to exactly one recognizer."""
+    class _Cap:
+        async def get_audio(self, duration, key, should_continue=None):
+            return None  # keep recognizers idle/cheap
+
+    async def scenario():
+        c = Controller(ma=None, capture=_Cap())
+        await asyncio.gather(*[
+            c._set_active_recognizer("aaaa" if i % 2 == 0 else "bbbb")
+            for i in range(24)
+        ])
+        assert len(c.recognizers) == 1      # never two for one player
+        await c._stop_all_recognizers()
+        assert c.recognizers == {}
+
+    asyncio.run(scenario())
+
+
 def test_get_audio_requires_fresh_data():
     """A full but STALE buffer must not be re-recognized; only fresh audio
     counts (fixes dead/paused streams 'recognizing' the same clip forever)."""
