@@ -26,7 +26,7 @@ ports:
   9014/tcp: 9014
   6056/udp: 6056
 ports_description:
-  9014/tcp: "Web UI (also available via the sidebar / ingress)"
+  9014/tcp: "Left port value maps to 9014/TCP internal port"
   6056/udp: "UDP audio input from Music Assistant"
 map:
   - addon_config:rw

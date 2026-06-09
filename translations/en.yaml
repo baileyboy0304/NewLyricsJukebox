@@ -127,5 +127,5 @@ configuration:
       Optional fixed player definitions (name + identifying RTP details). Not
       needed when auto-discover is on.
 network:
-  9014/tcp: Web UI (also available via the Home Assistant sidebar / ingress)
+  9014/tcp: Left port value maps to 9014/TCP internal port
   6056/udp: UDP audio stream from Music Assistant
