@@ -17,6 +17,11 @@
   recognised (`title=None`). Previously the poll bailed out before updating the
   chip whenever no track was identified yet, so picking a radio player that hadn't
   matched looked like nothing happened.
+- **Fade the screen between songs.** On a stream, when a song ends and recognition
+  stops matching (adverts / DJ talk / silence), the recognizer now drops its held
+  result instead of leaving the finished track on screen. The UI fades the
+  artwork, artist/title and lyrics away — leaving just the transport controls —
+  and fades back up when the next song is recognised.
 
 ## 1.0.27
 

@@ -147,6 +147,7 @@ async function loop() {
     if (playing) {
       idleSince = 0;
       interval = POLL_INTERVAL;
+      setStageVisible(true);
       if (!window._fetchingLyrics) {
         window._fetchingLyrics = true;
         pollLyrics().finally(() => { window._fetchingLyrics = false; });
@@ -154,6 +155,10 @@ async function loop() {
     } else {
       if (!idleSince) idleSince = Date.now();
       if (Date.now() - idleSince > IDLE_THRESHOLD) interval = IDLE_POLL_INTERVAL;
+      // No current track (between songs / stopped): fade the stage out and reset
+      // the progress bar, leaving just the transport controls.
+      setStageVisible(false);
+      resetProgress();
       currentLines = [];
       lyricStatus = '';
       currentTrackId = null;
@@ -218,6 +223,21 @@ function updatePlayPause(isPlaying) {
 
 function updateSpeakerName(name) {
   $('speaker-name').textContent = name || 'Select player';
+}
+
+// Fade the now-playing metadata + lyrics in/out. The transport controls live in
+// the footer and stay visible. Used to blank the screen between songs.
+function setStageVisible(visible) {
+  document.querySelector('.stage').classList.toggle('hidden', !visible);
+}
+
+function resetProgress() {
+  durationMs = null;
+  if (!isScrubbing) {
+    $('scrub').value = 0;
+    $('time-pos').textContent = '0:00';
+    $('time-dur').textContent = '0:00';
+  }
 }
 
 // ---------- transport ----------

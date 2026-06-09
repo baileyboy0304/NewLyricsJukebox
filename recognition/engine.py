@@ -284,6 +284,11 @@ class PlayerRecognizer:
         self._failures += 1
         if self._failures >= MAX_CONSECUTIVE_FAILURES and not self._paused:
             self._paused = True
+            # The song has ended (advert / DJ talk / silence between tracks). Drop
+            # the held result so current-track reports no track and the UI can fade
+            # the now-playing metadata + lyrics away until the next recognition.
+            self._current = None
+            self._lock.reset()
             logger.info("Player %s paused (no recognition)", self.key)
             if self._on_update:
                 self._on_update(self)
