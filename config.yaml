@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.32"
+version: "1.0.33"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -36,17 +36,17 @@ options:
   music_assistant_base_url: ""
   music_assistant_token: ""
   music_assistant_player_id: ""
-  # --- Recognition engine (UDP audio -> Shazam/ACRCloud) ---
+  # --- Recognition engine ---
   recognition_enabled: true
-  udp_listen_port: 6056
-  udp_audio_sample_rate: 16000
-  udp_jitter_buffer_ms: 60
   capture_duration: 6.0
   recognition_interval: 4.0
   lock_position_after: 3
   relock_position_after: 2
   latency_offset: 0.0
   blank_after_failures: 1
+  # --- UDP audio ---
+  udp_audio_sample_rate: 16000
+  udp_jitter_buffer_ms: 60
   # --- Cloud APIs ---
   acrcloud_host: ""
   acrcloud_access_key: ""
@@ -69,15 +69,14 @@ schema:
   music_assistant_token: str?
   music_assistant_player_id: str?
   recognition_enabled: bool
-  udp_listen_port: port
-  udp_audio_sample_rate: "int(8000,48000)"
-  udp_jitter_buffer_ms: "int(0,500)"
   capture_duration: "float(1.0,15.0)"
   recognition_interval: "float(1.0,30.0)"
   lock_position_after: "int(1,10)"
   relock_position_after: "int(1,10)"
   latency_offset: "float(-5.0,5.0)"
   blank_after_failures: "int(1,10)"
+  udp_audio_sample_rate: "int(8000,48000)"
+  udp_jitter_buffer_ms: "int(0,500)"
   acrcloud_host: str?
   acrcloud_access_key: str?
   acrcloud_access_secret: str?

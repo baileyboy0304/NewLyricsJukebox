@@ -1,133 +1,128 @@
 ## Friendly names + descriptions for the add-on options, shown in the Home
-## Assistant add-on Configuration UI. The add-on options form has no section
-## headings (a Supervisor limitation), so the options are ordered into logical
-## groups in config.yaml and each field is explained here instead.
+## Assistant add-on Configuration UI. HA add-on options forms have no section
+## headings (a Supervisor limitation), so each field's name is prefixed with its
+## group ("Music Assistant —", "Recognition —", "UDP audio —", "Cloud API —",
+## "Lyrics provider —", "General —") and the options are ordered to match, which
+## visually clusters them in the flat list.
 configuration:
   # --- Music Assistant ---
   music_assistant_base_url:
-    name: Music Assistant URL
+    name: Music Assistant — Server URL
     description: >-
       Base URL of your Music Assistant server, e.g. http://192.168.1.10:8095/.
       Used for now-playing metadata, artwork and the transport controls.
   music_assistant_token:
-    name: Music Assistant token
+    name: Music Assistant — Token
     description: >-
       Long-lived access token for Music Assistant. Required for metadata and
       transport control.
   music_assistant_player_id:
-    name: Preferred player (optional)
+    name: Music Assistant — Preferred player (optional)
     description: >-
       Music Assistant player ID to follow by default in "Auto" mode. Leave blank
       to automatically pick the player that is currently playing.
-  # --- Recognition engine (UDP audio -> Shazam/ACRCloud) ---
+  # --- Recognition engine ---
   recognition_enabled:
-    name: Enable stream recognition
+    name: Recognition — Enable stream recognition
     description: >-
       Turn on the UDP-audio + Shazam/ACRCloud pipeline used to identify radio and
       other live streams. Turn off to show lyrics only for sources playing through
       the Music Assistant queue (Spotify, local files) via their metadata.
-  udp_listen_port:
-    name: UDP audio port
-    description: >-
-      Port the add-on listens on for Music Assistant's RTP audio. If you change
-      it, set the same value on the 6056/udp host mapping in the Network panel.
-  udp_audio_sample_rate:
-    name: UDP audio sample rate (Hz)
-    description: >-
-      Sample rate of the RTP audio sent by Music Assistant. Leave at 16000 unless
-      you have changed it on the sender.
-  udp_jitter_buffer_ms:
-    name: UDP jitter buffer (ms)
-    description: >-
-      Buffering applied to incoming RTP audio to smooth out network jitter.
-      Default 60.
   capture_duration:
-    name: Capture length (seconds)
-    description: >-
-      How many seconds of audio to capture for each recognition attempt.
-      Default 6.
+    name: Recognition — Capture length (seconds)
+    description: How many seconds of audio to capture for each recognition attempt. Default 6.
   recognition_interval:
-    name: Recognition interval (seconds)
-    description: >-
-      How long to wait between recognition attempts. Default 4.
+    name: Recognition — Interval (seconds)
+    description: How long to wait between recognition attempts. Default 4.
   lock_position_after:
-    name: Lock position after N matches
+    name: Recognition — Lock position after N matches
     description: >-
       Number of agreeing recognitions before the playback position is locked and
       trusted (stops the lyrics jumping around). Default 3.
   relock_position_after:
-    name: Re-lock position after N matches
+    name: Recognition — Re-lock position after N matches
     description: >-
       Number of agreeing recognitions on a NEW timeline before a real position
       jump (e.g. a radio skip) is accepted. Default 2.
   latency_offset:
-    name: Sync offset (seconds)
+    name: Recognition — Sync offset (seconds)
     description: >-
       Manual fine-tuning of lyric timing. Positive shows lyrics later, negative
       shows them earlier. Default 0.
   blank_after_failures:
-    name: Fade lyrics after N failed recognitions
+    name: Recognition — Fade lyrics after N failed recognitions
     description: >-
       When a stream stops matching (song ended, advert, or DJ talking), fade the
       artwork, track details and lyrics away after this many consecutive misses,
       leaving just the transport controls. Default 1 (fade immediately).
+  # --- UDP audio ---
+  udp_audio_sample_rate:
+    name: UDP audio — Sample rate (Hz)
+    description: >-
+      Sample rate of the RTP audio sent by Music Assistant. Leave at 16000 unless
+      you have changed it on the sender. (The UDP port itself is set in the
+      Network panel below.)
+  udp_jitter_buffer_ms:
+    name: UDP audio — Jitter buffer (ms)
+    description: >-
+      Buffering applied to incoming RTP audio to smooth out network jitter.
+      Default 60.
   # --- Cloud APIs ---
   acrcloud_host:
-    name: ACRCloud host
+    name: Cloud API — ACRCloud host
     description: >-
       ACRCloud identification host. ACRCloud is the fallback recogniser used when
       Shazam can't identify a track. Optional.
   acrcloud_access_key:
-    name: ACRCloud access key
+    name: Cloud API — ACRCloud access key
     description: ACRCloud access key. Optional.
   acrcloud_access_secret:
-    name: ACRCloud access secret
+    name: Cloud API — ACRCloud access secret
     description: ACRCloud access secret. Optional.
   acrcloud_daily_limit:
-    name: ACRCloud daily limit
+    name: Cloud API — ACRCloud daily limit
     description: >-
       Maximum ACRCloud lookups per day. The counter persists across restarts.
       Default 100.
   spotify_client_id:
-    name: Spotify client ID (optional)
+    name: Cloud API — Spotify client ID (optional)
     description: >-
       Spotify API client ID, used only to enrich track metadata/album art. NOT
       required for the Spotify lyrics provider.
   spotify_client_secret:
-    name: Spotify client secret (optional)
+    name: Cloud API — Spotify client secret (optional)
     description: Spotify API client secret. Optional.
   # --- Lyrics providers ---
   provider_spotify:
-    name: "Lyrics provider: Spotify"
+    name: Lyrics provider — Spotify
     description: >-
       Fetch time-synced lyrics from Spotify — often the best line/word-synced
       quality. Highest priority. No Spotify credentials needed.
   provider_lrclib:
-    name: "Lyrics provider: LRCLIB"
+    name: Lyrics provider — LRCLIB
     description: Fetch synced lyrics from the free, open LRCLIB database.
   provider_musixmatch:
-    name: "Lyrics provider: Musixmatch"
+    name: Lyrics provider — Musixmatch
     description: Fetch synced lyrics from Musixmatch.
   provider_netease:
-    name: "Lyrics provider: NetEase"
+    name: Lyrics provider — NetEase
     description: >-
       Fetch synced lyrics from NetEase Cloud Music (useful for some non-Western
       tracks).
   provider_qq:
-    name: "Lyrics provider: QQ Music"
-    description: >-
-      Fetch synced lyrics from QQ Music. Off by default — can be slow.
+    name: Lyrics provider — QQ Music
+    description: Fetch synced lyrics from QQ Music. Off by default — can be slow.
   # --- General ---
   log_level:
-    name: Log level
+    name: General — Log level
     description: Logging verbosity. Use DEBUG for troubleshooting.
   players_auto_discover:
-    name: Auto-discover players
+    name: General — Auto-discover players
     description: >-
       Automatically list every detected RTP stream in the player picker. Leave on
       unless you want to define players manually below.
   players:
-    name: Manual players (advanced)
+    name: General — Manual players (advanced)
     description: >-
       Optional fixed player definitions (name + identifying RTP details). Not
       needed when auto-discover is on.
