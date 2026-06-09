@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.28"
+version: "1.0.29"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -40,6 +40,7 @@ options:
   capture_duration: 6.0
   recognition_interval: 4.0
   latency_offset: 0.0
+  blank_after_failures: 1
   acrcloud_host: ""
   acrcloud_access_key: ""
   acrcloud_access_secret: ""
@@ -68,6 +69,7 @@ schema:
   capture_duration: "float(1.0,15.0)"
   recognition_interval: "float(1.0,30.0)"
   latency_offset: "float(-5.0,5.0)"
+  blank_after_failures: "int(1,10)"
   acrcloud_host: str?
   acrcloud_access_key: str?
   acrcloud_access_secret: str?

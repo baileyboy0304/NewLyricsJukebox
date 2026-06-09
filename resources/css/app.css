@@ -44,7 +44,12 @@ body {
   justify-content: center;
   gap: 2.5rem;
   padding: 1rem;
+  transition: opacity 0.7s ease;
 }
+
+/* Between songs (adverts / DJ talk / silence): fade the now-playing metadata and
+   lyrics away, leaving just the transport controls, until the next recognition. */
+.stage.hidden { opacity: 0; }
 
 .now-playing {
   display: flex;

@@ -64,6 +64,9 @@ async function fetchJSON(url, options) {
 
 async function pollTrack() {
   const data = await fetchJSON(withPlayer('current-track'));
+  // Reflect the resolved player in the chip even while recognising (title=None),
+  // otherwise selecting a player on a not-yet-identified stream looks like a no-op.
+  if (data && data.player) updateSpeakerName(data.player);
   if (!data || !data.title) {
     flywheel.isPlaying = false;
     return false;
@@ -97,7 +100,6 @@ async function pollTrack() {
   else { art.style.visibility = 'hidden'; }
 
   updatePlayPause(data.is_playing);
-  updateSpeakerName(data.player);
   $('scrub').disabled = !seekable;
   return true;
 }
@@ -145,6 +147,7 @@ async function loop() {
     if (playing) {
       idleSince = 0;
       interval = POLL_INTERVAL;
+      setStageVisible(true);
       if (!window._fetchingLyrics) {
         window._fetchingLyrics = true;
         pollLyrics().finally(() => { window._fetchingLyrics = false; });
@@ -152,6 +155,10 @@ async function loop() {
     } else {
       if (!idleSince) idleSince = Date.now();
       if (Date.now() - idleSince > IDLE_THRESHOLD) interval = IDLE_POLL_INTERVAL;
+      // No current track (between songs / stopped): fade the stage out and reset
+      // the progress bar, leaving just the transport controls.
+      setStageVisible(false);
+      resetProgress();
       currentLines = [];
       lyricStatus = '';
       currentTrackId = null;
@@ -216,6 +223,21 @@ function updatePlayPause(isPlaying) {
 
 function updateSpeakerName(name) {
   $('speaker-name').textContent = name || 'Select player';
+}
+
+// Fade the now-playing metadata + lyrics in/out. The transport controls live in
+// the footer and stay visible. Used to blank the screen between songs.
+function setStageVisible(visible) {
+  document.querySelector('.stage').classList.toggle('hidden', !visible);
+}
+
+function resetProgress() {
+  durationMs = null;
+  if (!isScrubbing) {
+    $('scrub').value = 0;
+    $('time-pos').textContent = '0:00';
+    $('time-dur').textContent = '0:00';
+  }
 }
 
 // ---------- transport ----------
@@ -294,7 +316,7 @@ function playerRow(p, isAuto, unassigned) {
   const use = document.createElement('button');
   use.className = 'use-btn';
   use.textContent = 'Use';
-  use.onclick = () => selectPlayer(isAuto ? null : p.key);
+  use.onclick = () => selectPlayer(isAuto ? null : p.key, isAuto ? null : p.name);
   row.appendChild(use);
   return row;
 }
@@ -311,10 +333,12 @@ async function doRename(key, current) {
   }
 }
 
-function selectPlayer(key) {
+function selectPlayer(key, name) {
   selectedPlayer = key;
   if (key) localStorage.setItem('selectedPlayer', key);
   else localStorage.removeItem('selectedPlayer');
+  // Immediate feedback; the next poll confirms the server-resolved name.
+  updateSpeakerName(name);
   $('player-modal').classList.remove('open');
   currentTrackId = null;
   flywheel.reset();

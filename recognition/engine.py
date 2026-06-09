@@ -17,7 +17,6 @@ from recognition.shazam import ShazamRecognizer
 
 logger = logging.getLogger(__name__)
 
-MAX_CONSECUTIVE_FAILURES = 5
 # Display names for the recognition log line (result.provider is lowercase).
 _PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 # Safety net so a hung Shazam/ACRCloud network call can never stall a recognition
@@ -140,6 +139,9 @@ class PlayerRecognizer:
         self._interval = AUDIO_RECOGNITION["recognition_interval"]
         self._capture_duration = AUDIO_RECOGNITION["capture_duration"]
         self._latency_offset = AUDIO_RECOGNITION["latency_offset"]
+        # Clear the held track after this many consecutive no-matches so the UI
+        # can fade the metadata away between songs (default 1 = immediate).
+        self._blank_after = max(1, AUDIO_RECOGNITION.get("blank_after_failures", 1))
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._failures = 0
@@ -282,8 +284,15 @@ class PlayerRecognizer:
 
     async def _handle_failure(self):
         self._failures += 1
-        if self._failures >= MAX_CONSECUTIVE_FAILURES and not self._paused:
+        # The song has ended (advert / DJ talk / silence between tracks). After the
+        # configured number of consecutive no-matches, drop the held result so
+        # current-track reports no track and the UI fades the now-playing metadata +
+        # lyrics away until the next recognition. Default threshold is 1 (immediate).
+        if self._failures >= self._blank_after and self._current is not None:
+            self._current = None
+            self._lock.reset()
             self._paused = True
-            logger.info("Player %s paused (no recognition)", self.key)
+            logger.info("Player %s: %d no-match -> cleared track (fade out)",
+                        self.key, self._failures)
             if self._on_update:
                 self._on_update(self)

@@ -139,6 +139,10 @@ AUDIO_RECOGNITION = {
     "latency_offset": _as_float(conf("latency_offset", 0.0), 0.0),
     "silence_threshold": _as_int(conf("silence_threshold", 350), 350),
     "verification_cycles": _as_int(conf("verification_cycles", 2), 2),
+    # Consecutive failed recognitions before the now-playing metadata + lyrics are
+    # cleared (the UI then fades to just the transport controls). Default 1 so the
+    # screen blanks immediately when a song ends / an advert starts.
+    "blank_after_failures": _as_int(conf("blank_after_failures", 1), 1),
 }
 
 ACRCLOUD = {
