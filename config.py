@@ -128,7 +128,12 @@ MUSIC_ASSISTANT = {
 
 UDP_AUDIO = {
     "enabled": _as_bool(conf("recognition_enabled", True), True),
-    "port": _as_int(conf("udp_listen_port", 6056), 6056),
+    # Fixed at 6056 to match the container side of the `ports:` mapping in
+    # config.yaml — same reasoning as the web port: changing only the internal
+    # bind would desync from the static port mapping. To receive audio on a
+    # different HOST port, edit the host side of the `6056/udp` mapping in the
+    # add-on's Network config. Env override is for local development only.
+    "port": _as_int(os.getenv("UDP_LISTEN_PORT", "6056"), 6056),
     "sample_rate": _as_int(conf("udp_audio_sample_rate", 16000), 16000),
     "channels": 1,
     "jitter_buffer_ms": _as_int(conf("udp_jitter_buffer_ms", 60), 60),
