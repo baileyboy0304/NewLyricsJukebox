@@ -367,6 +367,7 @@ class SpotifyAPI:
         self.timeout = 5  # seconds
         self.retry_delay = 1  # seconds
         self.initialized = False
+        self.user_authed = False  # True only after a user OAuth sign-in
         
         self._last_metadata_check = 0
         self._metadata_cache = None
@@ -471,11 +472,27 @@ class SpotifyAPI:
                 # This blocks the event loop for seconds/minutes if network is slow
                 # Assume initialized if tokens exist, let the first async request handle auth errors
                 self.initialized = True
-                logger.info("Spotify API initialized with cached tokens (connection verification deferred)")
+                self.user_authed = True
+                logger.info("Spotify API initialized with cached user tokens (full access)")
             else:
-                # No cached tokens - don't test connection, wait for web auth
-                self.initialized = False
-                logger.info("No cached Spotify tokens - web authentication required")
+                # No user sign-in (and this build has no OAuth callback route). The
+                # lyrics provider only needs to SEARCH for a track, which works with
+                # the app-level Client Credentials flow — so enable search-only mode
+                # from just the client id + secret the user configured.
+                from spotipy.oauth2 import SpotifyClientCredentials
+                self.sp = spotipy.Spotify(
+                    auth_manager=SpotifyClientCredentials(
+                        client_id=SPOTIFY["client_id"],
+                        client_secret=SPOTIFY["client_secret"],
+                    ),
+                    requests_session=CountingSession(self.request_stats),
+                    requests_timeout=self.timeout,
+                    retries=self.max_retries,
+                )
+                self.initialized = True
+                self.user_authed = False
+                logger.info("Spotify API initialized with client credentials "
+                            "(track search for lyrics; user-only features disabled)")
         except Exception as e:
             logger.error(f"Failed to initialize Spotify API: {e}")
             self.initialized = False
@@ -614,6 +631,10 @@ class SpotifyAPI:
         """Get current track with playback state, smart caching, and interpolation"""
         if not self.initialized:
             logger.warning("Spotify API not initialized, skipping track fetch")
+            return None
+        if not self.user_authed:
+            # Reading the user's current playback needs a user sign-in; in
+            # client-credentials mode the lyrics provider falls back to search.
             return None
         
         # Track total function calls for statistics
