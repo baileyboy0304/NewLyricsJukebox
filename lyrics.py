@@ -98,11 +98,58 @@ class LyricsService:
 
     # -- provider cycling (manual +/- selection) -------------------------- #
 
+    def enabled_provider_names(self) -> List[str]:
+        """All enabled providers, by priority — the full list the +/- buttons
+        cycle through (even providers that have no lyrics for the current song)."""
+        return [p.name for p in self.providers if p.enabled]
+
     def provider_names_in(self, db: dict) -> List[str]:
         """Providers that have line-synced lyrics in this song's DB, ordered by
-        priority — the list the UI cycles through."""
+        priority."""
         saved = (db or {}).get("saved_lyrics", {})
         return [p.name for p in self.providers if p.name in saved]
+
+    def set_preferred(self, artist: str, title: str, provider: str) -> None:
+        """Persist the user's provider pick for this song so it's reused whenever
+        the song is recalled from cache (the provider/song correlation)."""
+        if not FEATURES["save_lyrics_locally"]:
+            return
+        path = _db_path(artist, title)
+        with _db_lock:
+            try:
+                db = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                db = {"artist": artist, "title": title, "saved_lyrics": {},
+                      "word_synced_lyrics": {}, "metadata": {}}
+            db["preferred_provider"] = provider
+            try:
+                tmp = path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(db, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, path)
+            except OSError as exc:  # pragma: no cover
+                logger.warning("Could not persist preferred provider: %s", exc)
+        logger.info("lyrics preferred provider for %s - %s -> %s", artist, title, provider)
+
+    async def fetch_provider(self, artist: str, title: str, provider: str,
+                             album: str = None, duration: int = None,
+                             on_update=None) -> Optional[LyricsData]:
+        """On-demand fetch from ONE provider (when the user cycles to a provider
+        not yet in the song's cache, e.g. Spotify added after the song was first
+        cached). Logs the outcome and caches any lyrics. ``on_update(data, db)``
+        is called with the result (data is None when the provider has none)."""
+        p = self._by_name.get(provider)
+        if p is None or not p.enabled:
+            return None
+        raw, err = await self._run_provider(p, artist, title, album, duration)
+        line, meta, word = _normalize_result(raw)
+        self._log_provider_outcome(provider, artist, title, line, word, err)
+        if line or word:
+            self._write_provider(artist, title, provider, line, meta, word)
+        db = self._read_db(artist, title) or {}
+        data = self.lyrics_for_provider(artist, title, db, provider)
+        if on_update:
+            on_update(data, db)
+        return data
 
     def lyrics_for_provider(self, artist: str, title: str, db: dict,
                             provider: str) -> Optional[LyricsData]:

@@ -125,6 +125,8 @@ async function pollLyrics() {
     lyricStatus = '';
   } else if (data.is_instrumental) {
     lyricStatus = '♪ Instrumental ♪';
+  } else if (data.no_lyrics) {
+    lyricStatus = data.provider ? `No lyrics from ${data.provider}` : '';
   } else if (data.pending) {
     lyricStatus = '…';
   } else {

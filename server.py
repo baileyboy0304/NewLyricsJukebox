@@ -31,6 +31,9 @@ class PlayerRuntime:
     lyrics_key: Optional[str] = None  # "artist|title" the lyrics belong to
     lyrics_db: Optional[dict] = None  # per-song DB (all providers) for +/- cycling
     lyrics_task: object = None        # background fetch task for the current track
+    preferred_provider: Optional[str] = None  # persisted +/- pick for this song
+    lyrics_attempts: set = field(default_factory=set)  # providers tried on demand
+    lyrics_empty: set = field(default_factory=set)     # providers tried, no lyrics
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
@@ -370,18 +373,37 @@ class Controller:
 
     # -- lyrics ------------------------------------------------------------ #
 
-    def _empty_lyrics(self, track_id=None, pending=False):
+    def _empty_lyrics(self, track_id=None, pending=False, provider=None,
+                      providers=None, no_lyrics=False):
         return {
             "track_id": track_id,
             "has_lyrics": False,
             "is_instrumental": False,
-            "provider": None,
+            "provider": provider,
+            "providers": providers or [],
+            "no_lyrics": no_lyrics,
             "word_sync_provider": None,
             "has_word_sync": False,
             "pending": pending,
             "lines": {"previous": "", "current": "", "next": ""},
             "line_synced": [],
             "word_synced": [],
+        }
+
+    def _lyrics_payload(self, track_id, data, providers, lines):
+        return {
+            "track_id": track_id,
+            "has_lyrics": data.has_lyrics,
+            "is_instrumental": data.is_instrumental,
+            "provider": data.line_provider,
+            "providers": providers,
+            "no_lyrics": False,
+            "word_sync_provider": data.word_provider,
+            "has_word_sync": data.has_word_sync,
+            "pending": False,
+            "lines": lines,
+            "line_synced": [{"start": s, "text": t} for s, t in data.line_synced],
+            "word_synced": data.word_synced,
         }
 
     async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album, duration):
@@ -398,6 +420,27 @@ class Controller:
             raise
         except Exception:  # noqa: BLE001
             logger.exception("Lyrics fetch failed for %s - %s", artist, title)
+
+    async def _fetch_provider_bg(self, runtime, lyrics_key, artist, title, provider):
+        """On-demand fetch when the user cycles to a provider not in the cache."""
+        def on_update(data, db):
+            if runtime.lyrics_key != lyrics_key:
+                return
+            runtime.lyrics_db = db
+            if data is None:                     # tried, no lyrics -> remember it
+                runtime.lyrics_empty.add(provider)
+        try:
+            await self.lyrics_service.fetch_provider(
+                artist, title, provider,
+                runtime.track.get("album"),
+                (runtime.track.get("duration_ms") or 0) // 1000 or None,
+                on_update=on_update,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("Lyrics provider %s fetch failed for %s - %s",
+                             provider, artist, title)
 
     def _log_line(self, runtime, name, position, line):
         """Log the current synced-lyric line the server is serving, so it can be
@@ -425,6 +468,9 @@ class Controller:
             runtime.lyrics_key = lyrics_key
             runtime.lyrics = None
             runtime.lyrics_db = None
+            runtime.preferred_provider = None
+            runtime.lyrics_attempts = set()
+            runtime.lyrics_empty = set()
             if runtime.lyrics_task and not runtime.lyrics_task.done():
                 runtime.lyrics_task.cancel()
             runtime.lyrics_task = asyncio.create_task(self._fetch_lyrics_bg(
@@ -433,35 +479,41 @@ class Controller:
                 (runtime.track.get("duration_ms") or 0) // 1000 or None,
             ))
 
+        # The +/- buttons cycle through ALL enabled providers (not only those with
+        # lyrics) so any provider can be tried.
+        providers = self.lyrics_service.enabled_provider_names()
+
+        # A specific provider was picked. Persist it (remembered on recall), and
+        # serve its lyrics — fetching on demand if it isn't cached yet.
+        if provider and provider in providers:
+            if provider != runtime.preferred_provider:
+                runtime.preferred_provider = provider
+                self.lyrics_service.set_preferred(artist, title, provider)
+            db = runtime.lyrics_db or {}
+            cached = self.lyrics_service.lyrics_for_provider(artist, title, db, provider)
+            if cached is not None:
+                position = runtime.track.get("position", 0.0)
+                lines = LyricsService.lines_around(cached, position)
+                self._log_line(runtime, name, position, lines.get("current", ""))
+                return self._lyrics_payload(track_id, cached, providers, lines)
+            if provider in runtime.lyrics_empty:        # tried, has none -> blank
+                return self._empty_lyrics(track_id, provider=provider,
+                                          providers=providers, no_lyrics=True)
+            if provider not in runtime.lyrics_attempts:  # not tried yet -> fetch it
+                runtime.lyrics_attempts.add(provider)
+                asyncio.create_task(self._fetch_provider_bg(
+                    runtime, lyrics_key, artist, title, provider))
+            return self._empty_lyrics(track_id, provider=provider,
+                                      providers=providers, pending=True)
+
         data = runtime.lyrics
         if data is None:
-            return self._empty_lyrics(track_id, pending=True)
-
-        # Providers that returned lyrics for this song — the list the +/- buttons
-        # cycle through. If the user picked a specific one, serve its lyrics.
-        providers = self.lyrics_service.provider_names_in(runtime.lyrics_db or {})
-        if provider and provider in providers:
-            chosen = self.lyrics_service.lyrics_for_provider(
-                artist, title, runtime.lyrics_db, provider)
-            if chosen is not None:
-                data = chosen
+            return self._empty_lyrics(track_id, providers=providers, pending=True)
 
         position = runtime.track.get("position", 0.0)
         lines = LyricsService.lines_around(data, position)
         self._log_line(runtime, name, position, lines.get("current", ""))
-        return {
-            "track_id": track_id,
-            "has_lyrics": data.has_lyrics,
-            "is_instrumental": data.is_instrumental,
-            "provider": data.line_provider,
-            "providers": providers,
-            "word_sync_provider": data.word_provider,
-            "has_word_sync": data.has_word_sync,
-            "pending": False,
-            "lines": lines,
-            "line_synced": [{"start": s, "text": t} for s, t in data.line_synced],
-            "word_synced": data.word_synced,
-        }
+        return self._lyrics_payload(track_id, data, providers, lines)
 
     # -- transport --------------------------------------------------------- #
 
