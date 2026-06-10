@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.35
+
+- **Spotify lyrics now work with just the client ID + secret.** Previously the
+  Spotify provider required a user OAuth sign-in for which this build has no
+  `/callback` route, so it could never authenticate. It now falls back to the
+  app-level **Client Credentials** flow (all the lyrics provider needs is track
+  *search*), so configuring the client ID + secret is enough — no sign-in.
+- **Spotify status is logged at boot.** The Spotify client was created lazily on
+  the first cache-miss fetch, so with everything cached you'd see no Spotify log
+  at all. It's now warmed up at startup, logging whether it initialised.
+- **Cache hits are logged.** Per-provider logging only ran on a fresh fetch, so
+  already-cached songs logged nothing. A cache hit now logs the chosen provider
+  and which providers have lyrics for that song.
+
 ## 1.0.34
 
 - **Cycle lyrics providers from the UI.** Added `+` / `−` buttons on the right of

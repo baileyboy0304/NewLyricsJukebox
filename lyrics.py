@@ -234,6 +234,11 @@ class LyricsService:
         cached = self._read_db(artist, title)
         if cached and cached.get("saved_lyrics"):
             data = self._select(artist, title, cached)
+            # Cached song: the per-provider fetch loop below is skipped, so log the
+            # cache hit here (otherwise nothing is logged for already-seen songs).
+            logger.info("lyrics from cache for %s - %s: using %s (have %s)",
+                        artist, title, data.line_provider,
+                        ", ".join(self.provider_names_in(cached)) or "none")
             if on_update:
                 on_update(data)
             return data
