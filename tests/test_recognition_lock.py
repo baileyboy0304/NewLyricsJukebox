@@ -167,8 +167,8 @@ class _StubACR:
         self._available = available
         self.calls = 0
 
-    def is_available(self):
-        return self._available
+    def unavailable_reason(self):
+        return None if self._available else "not configured"
 
     async def recognize(self, audio):
         self.calls += 1

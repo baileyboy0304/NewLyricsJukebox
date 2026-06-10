@@ -280,9 +280,10 @@ class PlayerRecognizer:
         shazam = self._current
         if shazam is None:
             return
-        if not self._acrcloud.is_available():
-            logger.info("ACR priority: ACRCloud unavailable (quota/cooldown) — "
-                        "keeping Shazam position for this track")
+        reason = self._acrcloud.unavailable_reason()
+        if reason:
+            logger.info("ACR priority: ACRCloud unavailable (%s) — "
+                        "keeping Shazam position for this track", reason)
             return
         try:
             acr = await asyncio.wait_for(
