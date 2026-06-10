@@ -109,27 +109,6 @@ class LyricsService:
         saved = (db or {}).get("saved_lyrics", {})
         return [p.name for p in self.providers if p.name in saved]
 
-    def set_preferred(self, artist: str, title: str, provider: str) -> None:
-        """Persist the user's provider pick for this song so it's reused whenever
-        the song is recalled from cache (the provider/song correlation)."""
-        if not FEATURES["save_lyrics_locally"]:
-            return
-        path = _db_path(artist, title)
-        with _db_lock:
-            try:
-                db = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                db = {"artist": artist, "title": title, "saved_lyrics": {},
-                      "word_synced_lyrics": {}, "metadata": {}}
-            db["preferred_provider"] = provider
-            try:
-                tmp = path.with_suffix(".json.tmp")
-                tmp.write_text(json.dumps(db, ensure_ascii=False), encoding="utf-8")
-                os.replace(tmp, path)
-            except OSError as exc:  # pragma: no cover
-                logger.warning("Could not persist preferred provider: %s", exc)
-        logger.info("lyrics preferred provider for %s - %s -> %s", artist, title, provider)
-
     async def fetch_provider(self, artist: str, title: str, provider: str,
                              album: str = None, duration: int = None,
                              on_update=None) -> Optional[LyricsData]:
@@ -204,34 +183,27 @@ class LyricsService:
         meta = db.get("metadata", {})
         data = LyricsData(artist=artist, title=title)
 
-        # PASS 1 — line-sync by pure priority (or user preference).
+        # PASS 1 — line-sync by PURE priority. The provider is chosen
+        # deterministically at the start of a track and stays put; a manual +/-
+        # pick is applied per-track by the server (not persisted), so the auto
+        # choice never jumps around between plays/recognitions.
         best_priority = 999
-        preferred = db.get("preferred_provider")
-        if preferred and preferred in saved:
-            data.line_synced = [tuple(x) for x in saved[preferred]]
-            data.line_provider = preferred
-        else:
-            for p in self.providers:
-                if p.name in saved and p.priority < best_priority:
-                    best_priority = p.priority
-                    data.line_synced = [tuple(x) for x in saved[p.name]]
-                    data.line_provider = p.name
+        for p in self.providers:
+            if p.name in saved and p.priority < best_priority:
+                best_priority = p.priority
+                data.line_synced = [tuple(x) for x in saved[p.name]]
+                data.line_provider = p.name
 
         # PASS 2 — word-sync independently, with a boost.
         best_ws = 999
-        preferred_ws = db.get("preferred_word_sync_provider")
-        if preferred_ws and word.get(preferred_ws):
-            data.word_synced = word[preferred_ws]
-            data.word_provider = preferred_ws
-        else:
-            for p in self.providers:
-                ws = word.get(p.name)
-                if ws:
-                    effective = p.priority - WORD_SYNC_BOOST
-                    if effective < best_ws:
-                        best_ws = effective
-                        data.word_synced = ws
-                        data.word_provider = p.name
+        for p in self.providers:
+            ws = word.get(p.name)
+            if ws:
+                effective = p.priority - WORD_SYNC_BOOST
+                if effective < best_ws:
+                    best_ws = effective
+                    data.word_synced = ws
+                    data.word_provider = p.name
 
         if db.get("is_instrumental_manual") is not None:
             data.is_instrumental = bool(db["is_instrumental_manual"])

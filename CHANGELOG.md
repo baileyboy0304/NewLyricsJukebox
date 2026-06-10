@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.39
+
+- **The lyrics provider no longer jumps around.** Auto-selection is now **pure
+  priority** — the highest-priority provider that has lyrics is chosen at the
+  start of a track and stays put. A manual +/- pick applies to the **current
+  track only** and is no longer persisted, so it can't "stick" to a song and make
+  later plays (or Shazam's title flapping between a song and its remix) show a
+  different provider each time. This reverses the per-song "remember the pick"
+  behaviour from 1.0.36, which is what caused the jumping; any leftover
+  `preferred_provider` in old cached songs is now ignored.
+
 ## 1.0.38
 
 - **Removed the Spotify lyrics provider and all its plumbing.** Spotify locked its

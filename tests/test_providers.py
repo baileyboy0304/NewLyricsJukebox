@@ -59,16 +59,18 @@ def test_word_sync_independent_with_boost():
     assert data.has_word_sync
 
 
-def test_user_preference_overrides():
+def test_auto_select_ignores_stale_preferred_and_uses_priority():
+    """Auto-selection is pure priority and stable: a leftover preferred_provider
+    in an old DB is ignored, so the displayed provider doesn't jump around."""
     svc = service()
     db = {
         "saved_lyrics": {"lrclib": [[0.0, "x"]], "qq": [[0.0, "y"]]},
         "word_synced_lyrics": {},
         "metadata": {},
-        "preferred_provider": "qq",
+        "preferred_provider": "qq",   # stale pick from before — must be ignored
     }
     data = svc._select("A", "B", db)
-    assert data.line_provider == "qq"
+    assert data.line_provider == "lrclib"   # priority 2 < qq 5
 
 
 def test_db_round_trip():
@@ -154,8 +156,9 @@ def test_enabled_provider_names_is_full_cycle_list():
     assert "musixmatch" in names and "netease" in names
 
 
-def test_set_preferred_is_used_on_recall():
-    """A picked provider persists and is served when the song is recalled."""
+def test_auto_pick_is_stable_by_priority_on_recall():
+    """Auto-selection always returns the highest-priority provider on recall —
+    it does not drift to whatever was viewed last."""
     import asyncio
     svc = service()
 
@@ -169,15 +172,10 @@ def test_set_preferred_is_used_on_recall():
     svc._by_name = {p.name: p for p in svc.providers}
 
     title = f"PrefTitle-{uuid.uuid4()}"
-    # First play caches both; auto picks musixmatch (priority 1).
     data = asyncio.run(svc.fetch("PrefArtist", title))
-    assert data.line_provider == "musixmatch"
-
-    # User picks lrclib -> persisted; recall now serves lrclib.
-    svc.set_preferred("PrefArtist", title, "lrclib")
+    assert data.line_provider == "musixmatch"        # priority 1
     recalled = asyncio.run(svc.fetch("PrefArtist", title))
-    assert recalled.line_provider == "lrclib"
-    assert recalled.line_synced[0][1] == "lrc"
+    assert recalled.line_provider == "musixmatch"    # still priority — stable
 
 
 def test_fetch_provider_caches_one_provider_on_demand():

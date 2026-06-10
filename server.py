@@ -31,7 +31,7 @@ class PlayerRuntime:
     lyrics_key: Optional[str] = None  # "artist|title" the lyrics belong to
     lyrics_db: Optional[dict] = None  # per-song DB (all providers) for +/- cycling
     lyrics_task: object = None        # background fetch task for the current track
-    preferred_provider: Optional[str] = None  # persisted +/- pick for this song
+    preferred_provider: Optional[str] = None  # current-track +/- pick (in-memory)
     lyrics_attempts: set = field(default_factory=set)  # providers tried on demand
     lyrics_empty: set = field(default_factory=set)     # providers tried, no lyrics
     log_key: Optional[str] = None     # last (mode,title) we logged
@@ -483,12 +483,11 @@ class Controller:
         # lyrics) so any provider can be tried.
         providers = self.lyrics_service.enabled_provider_names()
 
-        # A specific provider was picked. Persist it (remembered on recall), and
-        # serve its lyrics — fetching on demand if it isn't cached yet.
+        # A specific provider was picked with +/- — applies to the CURRENT track
+        # only (not persisted, so the next track auto-picks by priority again).
+        # Serve its lyrics, fetching on demand if it isn't cached yet.
         if provider and provider in providers:
-            if provider != runtime.preferred_provider:
-                runtime.preferred_provider = provider
-                self.lyrics_service.set_preferred(artist, title, provider)
+            runtime.preferred_provider = provider
             db = runtime.lyrics_db or {}
             cached = self.lyrics_service.lyrics_for_provider(artist, title, db, provider)
             if cached is not None:
