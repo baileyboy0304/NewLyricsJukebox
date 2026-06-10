@@ -40,17 +40,6 @@ async def _run():
     ma = MusicAssistant()
     await ma.connect()
 
-    # Warm the Spotify client at boot (it is otherwise created lazily on the first
-    # cache-miss lyrics fetch) so its credential / auth status is visible in the
-    # startup log instead of staying silent.
-    from config import is_provider_enabled
-    if is_provider_enabled("spotify"):
-        try:
-            from providers.spotify_api import get_shared_spotify_client
-            get_shared_spotify_client()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Spotify client warm-up failed: %s", exc)
-
     controller = Controller(ma=ma, capture=capture)
     app = create_app(controller)
 

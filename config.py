@@ -219,7 +219,9 @@ FEATURES = {
 }
 
 # --------------------------------------------------------------------------- #
-# Lyrics providers (kept: LRCLIB, Spotify, Musixmatch, NetEase, QQ)
+# Lyrics providers (LRCLIB, Musixmatch, NetEase, QQ — Spotify removed: its lyrics
+# endpoint is locked behind a rotating TOTP anti-bot, and Musixmatch covers the
+# same lyrics).
 # --------------------------------------------------------------------------- #
 
 def _provider_enabled(name: str) -> bool:
@@ -239,14 +241,6 @@ PROVIDERS = {
         "timeout": _as_int(conf("providers.lrclib.timeout", 10), 10),
         "retries": _as_int(conf("providers.lrclib.retries", 3), 3),
         "cache_duration": _as_int(conf("providers.lrclib.cache_duration", 86400), 86400),
-    },
-    "spotify": {
-        "enabled": _provider_enabled("spotify"),
-        "priority": _as_int(conf("providers.spotify.priority", 1), 1),
-        "base_url": os.getenv("SPOTIFY_BASE_URL", "https://spotify-lyrics-api-azure.vercel.app"),
-        "timeout": _as_int(conf("providers.spotify.timeout", 10), 10),
-        "retries": _as_int(conf("providers.spotify.retries", 3), 3),
-        "cache_duration": _as_int(conf("providers.spotify.cache_duration", 3600), 3600),
     },
     "musixmatch": {
         "enabled": _provider_enabled("musixmatch"),
@@ -282,36 +276,3 @@ def is_provider_enabled(name: str) -> bool:
 
 def get_provider_priority(name: str) -> int:
     return PROVIDERS.get(name, {}).get("priority", 100)
-
-
-# Spotify API (used by the Spotify lyrics provider). Credentials optional.
-SPOTIFY = {
-    "client_id": conf("spotify_client_id", "") or os.getenv("SPOTIFY_CLIENT_ID", ""),
-    "client_secret": conf("spotify_client_secret", "") or os.getenv("SPOTIFY_CLIENT_SECRET", ""),
-    # The `sp_dc` cookie from a logged-in Spotify web session — the ONLY credential
-    # that grants access to Spotify's (Musixmatch-powered) lyrics endpoint. The
-    # developer client id/secret cannot reach lyrics. Valid ~1 year.
-    "sp_dc": conf("spotify_sp_dc", "") or os.getenv("SPOTIFY_SP_DC", ""),
-    "redirect_uri": conf("spotify.redirect_uri", "http://127.0.0.1:9014/callback"),
-    "scope": ["user-read-currently-playing", "user-read-playback-state"],
-    "cache": {
-        "enabled": _as_bool(conf("spotify.cache.enabled", True), True),
-        "metadata_ttl": _as_float(conf("spotify.cache.metadata_ttl", 2.0), 2.0),
-    },
-    "polling": {
-        "fast_interval": _as_float(conf("spotify.polling.fast_interval", 2.0), 2.0),
-        "slow_interval": _as_float(conf("spotify.polling.slow_interval", 6.0), 6.0),
-    },
-}
-
-# Album-art enhancement flags consulted by the Spotify provider. The full
-# album-art subsystem is intentionally dropped; these defaults keep the
-# provider import working without enabling any extra fetching.
-ALBUM_ART = {
-    "timeout": 5,
-    "retries": 2,
-    "enable_itunes": False,
-    "enable_lastfm": False,
-    "enable_spotify_enhanced": False,
-    "min_resolution": 640,
-}
