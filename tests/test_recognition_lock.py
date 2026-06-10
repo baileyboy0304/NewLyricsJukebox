@@ -178,6 +178,18 @@ class _StubACR:
         return self._result
 
 
+def test_same_recording_ignores_version_noise():
+    """The George Benson case: same song, different variant labels must count as
+    the same recording (so ACR's position + Spotify id are used)."""
+    from recognition.engine import _same_recording
+    a = make(10, 0, title="Lady Love Me (One More Time)", artist="George Benson")
+    b = make(10, 0, title="Lady Love Me (2003 Remaster)", artist="George Benson")
+    assert _same_recording(a, b) is True
+    # A genuinely different song by the same artist is still rejected.
+    c = make(10, 0, title="Give Me The Night", artist="George Benson")
+    assert _same_recording(a, c) is False
+
+
 def test_acr_priority_carries_spotify_id_when_adopted():
     """When ACR is adopted, its Spotify track id rides along for lyrics lookup."""
     import asyncio

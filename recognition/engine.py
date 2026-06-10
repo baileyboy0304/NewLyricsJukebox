@@ -20,6 +20,7 @@ from config import AUDIO_RECOGNITION, UDP_AUDIO
 from recognition.acrcloud import ACRCloudRecognizer
 from recognition.result import RecognitionResult
 from recognition.shazam import ShazamRecognizer
+from text_clean import strip_version_noise
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +33,20 @@ RECOGNIZE_TIMEOUT = 10.0
 
 def _same_recording(a: RecognitionResult, b: RecognitionResult) -> bool:
     """Looser track equality used only by the ACR refinement. Shazam and ACRCloud
-    routinely label the same recording slightly differently — e.g. Shazam's "It
-    Must Have Been Love" vs ACRCloud's "It Must Have Been Love (From the Film
-    'Pretty Woman')". Treat them as the same recording when the artist matches and
-    one title is a prefix of the other, so a valid position isn't thrown away over
-    a cosmetic suffix. (RecognitionResult.is_same_song stays strict for the main
-    song-change detection.)"""
+    routinely label the same recording differently — e.g. "It Must Have Been Love"
+    vs "... (From the Film 'Pretty Woman')", or "Lady Love Me (One More Time)" vs
+    "Lady Love Me (2003 Remaster)". Version noise (remaster/edit/live/...) is
+    stripped from BOTH titles first, then they match if the artist is equal and one
+    cleaned title is a prefix of the other — so a valid position + Spotify id isn't
+    thrown away over a variant label. (RecognitionResult.is_same_song stays strict
+    for the main song-change detection.)"""
     na = (a.artist or "").strip().lower()
     nb = (b.artist or "").strip().lower()
     if not na or na != nb:
         return False
-    ta = (a.title or "").strip().lower()
-    tb = (b.title or "").strip().lower()
-    return bool(ta) and (ta == tb or ta.startswith(tb) or tb.startswith(ta))
+    ta = strip_version_noise((a.title or "").strip().lower())
+    tb = strip_version_noise((b.title or "").strip().lower())
+    return bool(ta and tb) and (ta == tb or ta.startswith(tb) or tb.startswith(ta))
 
 
 class LockTracker:
