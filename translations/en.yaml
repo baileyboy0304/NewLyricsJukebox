@@ -55,6 +55,20 @@ configuration:
       When a stream stops matching (song ended, advert, or DJ talking), fade the
       artwork, track details and lyrics away after this many consecutive misses,
       leaving just the transport controls. Default 1 (fade immediately).
+  acr_priority:
+    name: Recognition — ACR priority (TEST)
+    description: >-
+      TEST FEATURE. When on, each newly-detected track gets one ACRCloud lookup
+      to refine the Shazam position (ACRCloud is assumed more accurate). If the
+      two positions agree, the ACRCloud position is adopted and frozen for the
+      rest of the track, so only one ACRCloud lookup is spent per song. When off,
+      ACRCloud is only used as the fallback when Shazam fails. Default off.
+  acr_priority_tolerance:
+    name: Recognition — ACR priority tolerance (seconds)
+    description: >-
+      How close the ACRCloud position must be to the Shazam position (in seconds)
+      to be trusted and adopted when ACR priority is on. A larger ACRCloud
+      disagreement is ignored and the Shazam position is kept. Default 5.
   # --- UDP audio ---
   udp_audio_sample_rate:
     name: UDP audio — Sample rate (Hz)

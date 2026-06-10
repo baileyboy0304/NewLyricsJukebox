@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.39
+
+- **🧪 TEST FEATURE — "ACR priority" (one ACRCloud lookup per track).** New
+  add-on option **`acr_priority`** (default **off**). Background: ACRCloud is
+  assumed more accurate for sync than Shazam but is limited to ~100 lookups/day,
+  so it can't run every cycle on a radio stream. When **on**, Shazam still does
+  all the routine recognition, but each time a *new* track is detected it triggers
+  **exactly one** ACRCloud lookup to refine the position. If the ACRCloud position
+  agrees with Shazam within **`acr_priority_tolerance`** seconds (default 5) it is
+  adopted and **frozen** for the rest of the track — subsequent Shazam reads only
+  re-confirm the track and never move the clock (the served position keeps
+  advancing on its own). This guarantees at most one ACRCloud lookup per song
+  (none wasted). If ACRCloud is unavailable (quota/cooldown), times out, matches a
+  different track, or disagrees beyond tolerance, the Shazam position is kept and
+  normal lock behaviour resumes. When **off**, the app behaves exactly as before
+  (ACRCloud is only the fallback when Shazam fails). This is a **test feature**;
+  it is self-contained and can be reverted by turning the option off or reverting
+  the PR.
+
 ## 1.0.38
 
 - **Removed the Spotify lyrics provider and all its plumbing.** Spotify locked its
