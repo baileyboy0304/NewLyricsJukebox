@@ -19,7 +19,7 @@ import logging
 from .base import LyricsProvider
 from providers.spotify_api import get_shared_spotify_client
 from logging_config import get_logger
-from config import get_provider_config
+from config import get_provider_config, SPOTIFY
 
 # Configure logging
 # logging.basicConfig(level=logging.INFO)
@@ -27,11 +27,27 @@ from config import get_provider_config
 
 logger = get_logger(__name__)
 
+# Spotify's own (Musixmatch-powered) lyrics, fetched directly from the web-player
+# endpoint using an sp_dc cookie — the same method syrics / librelyrics use. This
+# is the only way to read Spotify lyrics; the developer client id/secret can't.
+_WEB_TOKEN_URL = ("https://open.spotify.com/get_access_token"
+                  "?reason=transport&productType=web_player")
+_COLOR_LYRICS_URL = ("https://spclient.wg.spotify.com/color-lyrics/v2/track/{track_id}"
+                     "?format=json&vocalRemoval=false&market=from_token")
+_WEB_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+
 class SpotifyLyrics(LyricsProvider):
     """Spotify lyrics provider using hosted API"""
-    
+
     # FIX: Class-level flag to log Spotify unavailable only once
     _spotify_unavailable_logged = False
+
+    # Shared web-player access token (derived from sp_dc), cached until expiry.
+    _web_token = None
+    _web_token_exp = 0.0
+    _sp_dc_bad_logged = False
     
     def __init__(self) -> None:
         """Initialize Spotify lyrics provider with config settings"""
@@ -42,10 +58,85 @@ class SpotifyLyrics(LyricsProvider):
         
         # Initialize API settings from config
         self.api_url = config.get('base_url', 'https://spotify-lyrics-api-azure.vercel.app')
+        self.sp_dc = SPOTIFY.get("sp_dc", "")
         # NOTE: We use get_shared_spotify_client() lazily in get_lyrics() instead of storing
         # an instance here. This ensures all API calls use the singleton instance and
         # statistics are consolidated across the entire app.
-            
+
+    # -- direct sp_dc lyrics (no third-party proxy) ----------------------- #
+
+    def _get_web_token(self) -> Optional[str]:
+        """Exchange the sp_dc cookie for a Spotify web-player access token, cached
+        until shortly before it expires. Returns None if sp_dc is missing/invalid."""
+        if not self.sp_dc:
+            return None
+        now = time.time()
+        if SpotifyLyrics._web_token and now < SpotifyLyrics._web_token_exp - 30:
+            return SpotifyLyrics._web_token
+        try:
+            resp = requests.get(
+                _WEB_TOKEN_URL,
+                headers={"Cookie": f"sp_dc={self.sp_dc}", "User-Agent": _WEB_UA,
+                         "App-platform": "WebPlayer"},
+                timeout=self.timeout,
+            )
+            data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Spotify web token request failed: %s", exc)
+            return None
+        token = data.get("accessToken")
+        if data.get("isAnonymous") or not token:
+            if not SpotifyLyrics._sp_dc_bad_logged:
+                logger.warning("Spotify sp_dc cookie invalid/expired — got an anonymous "
+                               "token; lyrics unavailable until it's refreshed")
+                SpotifyLyrics._sp_dc_bad_logged = True
+            return None
+        SpotifyLyrics._sp_dc_bad_logged = False
+        SpotifyLyrics._web_token = token
+        SpotifyLyrics._web_token_exp = data.get("accessTokenExpirationTimestampMs", 0) / 1000.0
+        logger.info("Spotify web-player token obtained from sp_dc cookie")
+        return token
+
+    def _fetch_color_lyrics(self, track_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch synced lyrics straight from Spotify's color-lyrics endpoint."""
+        token = self._get_web_token()
+        if not token:
+            return None
+        try:
+            resp = requests.get(
+                _COLOR_LYRICS_URL.format(track_id=track_id),
+                headers={"authorization": f"Bearer {token}", "app-platform": "WebPlayer",
+                         "User-Agent": _WEB_UA},
+                timeout=self.timeout,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Spotify color-lyrics request failed: %s", exc)
+            return None
+        if resp.status_code == 404:
+            return None                      # genuinely no lyrics for this track
+        if resp.status_code == 401:
+            SpotifyLyrics._web_token = None  # token rejected -> force refresh next time
+            logger.warning("Spotify color-lyrics 401 (token rejected); will refresh sp_dc token")
+            return None
+        if resp.status_code != 200:
+            logger.warning("Spotify color-lyrics returned %s", resp.status_code)
+            return None
+        try:
+            lyr = resp.json().get("lyrics", {})
+        except Exception:  # noqa: BLE001
+            return None
+        if lyr.get("syncType") != "LINE_SYNCED":
+            return None                      # only keep time-synced lyrics
+        lines = []
+        for ln in lyr.get("lines", []):
+            words = (ln.get("words") or "").strip()
+            if not words or words == "♪":
+                continue
+            lines.append((int(ln.get("startTimeMs", 0)) / 1000.0, words))
+        if lines:
+            return {"lyrics": lines, "is_instrumental": False}
+        return None
+
     async def get_lyrics(self, artist: str, title: str, 
                           album: str = None, duration: int = None) -> Optional[Dict[str, Any]]:
         """
@@ -103,12 +194,24 @@ class SpotifyLyrics(LyricsProvider):
             
             # Use the track URL
             track_url = track['url']
-            
+            loop = asyncio.get_running_loop()
+
+            # PREFERRED: fetch straight from Spotify with the sp_dc cookie (no flaky
+            # third-party proxy). Falls through to the proxy below if not configured
+            # or it returns nothing.
+            track_id = track.get('track_id') or (track_url.rstrip('/').split('/')[-1]
+                                                 if track_url else None)
+            if self.sp_dc and track_id:
+                direct = await loop.run_in_executor(None, self._fetch_color_lyrics, track_id)
+                if direct:
+                    logger.info(f"Spotify - Lyrics via sp_dc for {artist} - {title} "
+                                f"({len(direct['lyrics'])} lines)")
+                    return direct
+
             # CRITICAL FIX: Implement retry logic with exponential backoff
             # Retry on 404 (might be temporary server issue), server errors (5xx), and connection errors
             last_error = None
-            loop = asyncio.get_running_loop()
-            
+
             for attempt in range(self.retries):
                 try:
                     # Run blocking request in executor to avoid freezing the UI
