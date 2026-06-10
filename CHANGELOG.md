@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.38
+
+- **Removed the Spotify lyrics provider and all its plumbing.** Spotify locked its
+  lyrics endpoint behind a rotating TOTP anti-bot (the public proxy is dead and a
+  direct `sp_dc` fetch needs a secret Spotify keeps rotating), and Musixmatch —
+  which is where Spotify's lyrics come from anyway — already covers the same
+  content. Deleted the Spotify provider + Spotify API client, the
+  `spotify_client_id` / `spotify_client_secret` / `spotify_sp_dc` /
+  `provider_spotify` options, the `SPOTIFY`/`ALBUM_ART` config, and the now-unused
+  `spotipy` / `python-dotenv` dependencies. Remaining lyrics providers: LRCLIB,
+  Musixmatch, NetEase, QQ. (Spotify *Connect* source detection for recognition is
+  unaffected.)
+
 ## 1.0.37
 
 - **Spotify lyrics fetched directly with an `sp_dc` cookie — no third-party

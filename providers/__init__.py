@@ -6,30 +6,27 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-sys.path.append(str(Path(__file__).parent.parent)) 
+sys.path.append(str(Path(__file__).parent.parent))
 
 from .base import LyricsProvider
 from .lrclib import LRCLIBProvider
 from .netease import NetEaseProvider
-from .spotify_lyrics import SpotifyLyrics
 from .qq import QQMusicProvider
-from .musixmatch import MusixmatchProvider  # <--- ADDED
+from .musixmatch import MusixmatchProvider
 
 # List of all available providers
 available_providers = [
     LRCLIBProvider,
     NetEaseProvider,
-    SpotifyLyrics,
     QQMusicProvider,
-    MusixmatchProvider  # <--- ADDED
+    MusixmatchProvider,
 ]
 
 __all__ = [
     'LyricsProvider',
     'LRCLIBProvider',
     'NetEaseProvider',
-    'SpotifyLyrics',
     'QQMusicProvider',
-    'MusixmatchProvider',  # <--- ADDED
+    'MusixmatchProvider',
     'available_providers'
 ]

@@ -1,7 +1,7 @@
 """Lyrics lookup + per-song JSON DB.
 
 Keeps all the hard-won provider knowledge from the legacy app — every provider
-(LRCLIB, Spotify, Musixmatch, NetEase, QQ), priorities, parallel fetch, two-pass
+(LRCLIB, Musixmatch, NetEase, QQ), priorities, parallel fetch, two-pass
 selection (line-sync by pure priority; word-sync independently with a boost) and
 the per-song multi-provider DB schema.
 
@@ -134,9 +134,9 @@ class LyricsService:
                              album: str = None, duration: int = None,
                              on_update=None) -> Optional[LyricsData]:
         """On-demand fetch from ONE provider (when the user cycles to a provider
-        not yet in the song's cache, e.g. Spotify added after the song was first
-        cached). Logs the outcome and caches any lyrics. ``on_update(data, db)``
-        is called with the result (data is None when the provider has none)."""
+        not yet in the song's cache, e.g. a provider enabled after the song was
+        first cached). Logs the outcome and caches any lyrics. ``on_update(data,
+        db)`` is called with the result (data is None when the provider has none)."""
         p = self._by_name.get(provider)
         if p is None or not p.enabled:
             return None

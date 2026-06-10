@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -21,10 +22,10 @@ def service():
 def test_providers_loaded_and_ordered():
     svc = service()
     names = [p.name for p in svc.providers]
-    # spotify(1) before lrclib(2) before the rest by priority.
-    assert names[0] == "spotify"
+    # lrclib(2) is now highest priority (Spotify removed); qq is last.
+    assert names[0] == "lrclib"
     assert names.index("lrclib") < names.index("qq")
-    assert set(names) == {"spotify", "lrclib", "musixmatch", "netease", "qq"}
+    assert set(names) == {"lrclib", "musixmatch", "netease", "qq"}
 
 
 def test_line_sync_selected_by_priority():
@@ -96,14 +97,14 @@ def test_parallel_fetch_selects_best(tmp_path=None):
 
     svc = service()
     svc.providers = [
-        _FakeProvider("spotify", 1, [(0.0, "spotify line")]),
+        _FakeProvider("musixmatch", 1, [(0.0, "mxm line")]),
         _FakeProvider("qq", 5, [(0.0, "qq line")]),
     ]
     svc._by_name = {p.name: p for p in svc.providers}
 
-    data = asyncio.run(svc.fetch("FetchArtist", "FetchTitle"))
-    assert data.line_provider == "spotify"
-    assert data.line_synced[0][1] == "spotify line"
+    data = asyncio.run(svc.fetch("FetchArtist", f"FetchTitle-{uuid.uuid4()}"))
+    assert data.line_provider == "musixmatch"
+    assert data.line_synced[0][1] == "mxm line"
 
 
 def test_lines_around():
@@ -124,9 +125,9 @@ def test_provider_names_in_ordered_by_priority():
     """The +/- cycle lists every provider that returned lyrics, by priority."""
     svc = service()
     db = {"saved_lyrics": {"qq": [[0.0, "q"]], "lrclib": [[0.0, "l"]],
-                           "spotify": [[0.0, "s"]]}}
-    # spotify(1) < lrclib(2) < qq(5)
-    assert svc.provider_names_in(db) == ["spotify", "lrclib", "qq"]
+                           "musixmatch": [[0.0, "m"]]}}
+    # lrclib(2) < musixmatch(3) < qq(5)
+    assert svc.provider_names_in(db) == ["lrclib", "musixmatch", "qq"]
     assert svc.provider_names_in({}) == []
 
 
@@ -149,8 +150,8 @@ def test_enabled_provider_names_is_full_cycle_list():
     """The +/- cycle lists ALL enabled providers, not only those with lyrics."""
     svc = service()
     names = svc.enabled_provider_names()
-    assert names[0] == "spotify"            # priority order
-    assert "musixmatch" in names and "lrclib" in names
+    assert names[0] == "lrclib"             # priority order (Spotify removed)
+    assert "musixmatch" in names and "netease" in names
 
 
 def test_set_preferred_is_used_on_recall():
@@ -164,16 +165,17 @@ def test_set_preferred_is_used_on_recall():
         async def get_lyrics(s, a, t, al=None, d=None):
             return {"lyrics": s._lines}
 
-    svc.providers = [_P("spotify", 1, [(0.0, "spot")]), _P("lrclib", 2, [(0.0, "lrc")])]
+    svc.providers = [_P("musixmatch", 1, [(0.0, "mxm")]), _P("lrclib", 2, [(0.0, "lrc")])]
     svc._by_name = {p.name: p for p in svc.providers}
 
-    # First play caches both; auto picks spotify (priority 1).
-    data = asyncio.run(svc.fetch("PrefArtist", "PrefTitle"))
-    assert data.line_provider == "spotify"
+    title = f"PrefTitle-{uuid.uuid4()}"
+    # First play caches both; auto picks musixmatch (priority 1).
+    data = asyncio.run(svc.fetch("PrefArtist", title))
+    assert data.line_provider == "musixmatch"
 
     # User picks lrclib -> persisted; recall now serves lrclib.
-    svc.set_preferred("PrefArtist", "PrefTitle", "lrclib")
-    recalled = asyncio.run(svc.fetch("PrefArtist", "PrefTitle"))
+    svc.set_preferred("PrefArtist", title, "lrclib")
+    recalled = asyncio.run(svc.fetch("PrefArtist", title))
     assert recalled.line_provider == "lrclib"
     assert recalled.line_synced[0][1] == "lrc"
 
@@ -191,8 +193,9 @@ def test_fetch_provider_caches_one_provider_on_demand():
     p = _P()
     svc.providers = [p]
     svc._by_name = {p.name: p}
-    data = asyncio.run(svc.fetch_provider("OnDemand", "Song", "netease"))
+    song = f"Song-{uuid.uuid4()}"
+    data = asyncio.run(svc.fetch_provider("OnDemand", song, "netease"))
     assert data is not None and data.line_provider == "netease"
     # Now cached for cycling.
-    db = svc.read_db("OnDemand", "Song")
+    db = svc.read_db("OnDemand", song)
     assert "netease" in db.get("saved_lyrics", {})

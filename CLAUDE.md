@@ -43,8 +43,10 @@ per-song JSON DB → server (REST) → browser (polling + flywheel clock)`.
 
 ## Lyrics
 
-- Keep **all** providers: LRCLIB, Musixmatch, Spotify, NetEase, QQ — with the existing
-  priorities, parallel fetch, and two-pass selection.
+- Providers: LRCLIB, Musixmatch, NetEase, QQ — with the existing priorities,
+  parallel fetch, and two-pass selection. (**Spotify was removed**: its lyrics
+  endpoint is locked behind a rotating TOTP anti-bot, and Musixmatch — which is
+  what Spotify's lyrics come from — covers the same content. Don't reintroduce it.)
 - Keep the per-song JSON DB schema.
 
 ## Players & UI
