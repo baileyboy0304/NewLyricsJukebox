@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.37
+
+- **Spotify lyrics fetched directly with an `sp_dc` cookie — no third-party
+  proxy.** The old public proxy (`spotify-lyrics-api-azure.vercel.app`) is dead
+  (persistent 404s). Spotify has no client-id/secret or OAuth path to lyrics —
+  its lyrics endpoint only accepts a web-player token from the **`sp_dc` cookie**
+  (the same method syrics / librelyrics use). New option **`spotify_sp_dc`**: with
+  it set, the provider fetches synced lyrics straight from Spotify's
+  `color-lyrics` endpoint (token cached until expiry); without it, it falls back
+  to the proxy. The cookie is valid ~1 year. Spotify lyrics need the client
+  ID/secret (to find the track) **and** the sp_dc cookie (to read the lyrics).
+
 ## 1.0.36
 
 - **+/- cycles through every provider, fetching on demand.** The buttons now step

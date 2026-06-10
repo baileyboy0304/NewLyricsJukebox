@@ -85,21 +85,29 @@ configuration:
       Maximum ACRCloud lookups per day. The counter persists across restarts.
       Default 100.
   spotify_client_id:
-    name: Cloud API — Spotify client ID (optional)
+    name: Cloud API — Spotify client ID
     description: >-
-      Spotify API client ID, used only to enrich track metadata/album art. NOT
-      required for the Spotify lyrics provider.
+      Spotify API client ID. Used by the Spotify lyrics provider to look up the
+      track (and to enrich metadata/art). Lyrics themselves also need the sp_dc
+      cookie below.
   spotify_client_secret:
     name: Cloud API — Spotify client secret (optional)
     description: Spotify API client secret. Optional.
+  spotify_sp_dc:
+    name: Cloud API — Spotify sp_dc cookie (for lyrics)
+    description: >-
+      The `sp_dc` cookie from a logged-in Spotify web session (open.spotify.com →
+      DevTools → Application → Cookies → sp_dc). This is the only credential that
+      unlocks Spotify's synced lyrics; the client ID/secret alone cannot. Valid
+      about a year. Leave blank to skip Spotify lyrics.
   # --- Lyrics providers ---
   provider_spotify:
     name: Lyrics provider — Spotify
     description: >-
-      Fetch time-synced lyrics from Spotify — often the best line/word-synced
-      quality. Highest priority. Needs the Spotify client ID + secret above (no
-      user sign-in required); without them this provider returns nothing and the
-      others are used.
+      Fetch time-synced lyrics from Spotify (Musixmatch-sourced). Highest
+      priority. Needs BOTH the Spotify client ID/secret (to find the track) AND
+      the sp_dc cookie above (to read the lyrics). Without the sp_dc cookie this
+      provider returns nothing and the others are used.
   provider_lrclib:
     name: Lyrics provider — LRCLIB
     description: Fetch synced lyrics from the free, open LRCLIB database.

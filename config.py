@@ -288,6 +288,10 @@ def get_provider_priority(name: str) -> int:
 SPOTIFY = {
     "client_id": conf("spotify_client_id", "") or os.getenv("SPOTIFY_CLIENT_ID", ""),
     "client_secret": conf("spotify_client_secret", "") or os.getenv("SPOTIFY_CLIENT_SECRET", ""),
+    # The `sp_dc` cookie from a logged-in Spotify web session — the ONLY credential
+    # that grants access to Spotify's (Musixmatch-powered) lyrics endpoint. The
+    # developer client id/secret cannot reach lyrics. Valid ~1 year.
+    "sp_dc": conf("spotify_sp_dc", "") or os.getenv("SPOTIFY_SP_DC", ""),
     "redirect_uri": conf("spotify.redirect_uri", "http://127.0.0.1:9014/callback"),
     "scope": ["user-read-currently-playing", "user-read-playback-state"],
     "cache": {
