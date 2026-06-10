@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.42
+
+- **🧪 ACRCloud Spotify track id → exact-recording lyrics (Phase 1).** When ACR
+  priority is on, ACRCloud now also returns the matched track's **Spotify id**
+  (Shazam doesn't expose one). That id is carried onto the served track and passed
+  to Musixmatch as `track_spotify_id`, so lyrics are pinned to the *exact*
+  recording instead of a fuzzy artist/title search — which on radio often lands on
+  the wrong variant (radio edit / remaster / live). The id is attached whenever
+  ACRCloud matched the same recording, even if its position isn't adopted, so the
+  lyrics benefit doesn't depend on the position passing tolerance. Providers that
+  don't support Spotify-id lookup (LRCLIB, NetEase, QQ) simply ignore it. No new
+  options; piggybacks on the existing ACR-priority switch.
+
 ## 1.0.41
 
 - **ACRCloud is no longer a Shazam fallback at all — it is used exclusively for

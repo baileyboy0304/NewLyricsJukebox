@@ -178,6 +178,40 @@ class _StubACR:
         return self._result
 
 
+def test_acr_priority_carries_spotify_id_when_adopted():
+    """When ACR is adopted, its Spotify track id rides along for lyrics lookup."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(tolerance=5.0)
+        shazam = make(10, 1000.0)
+        acr = make(12, 1000.0); acr.provider = "acrcloud"; acr.spotify_id = "sp123"
+        rec._acrcloud = _StubACR(acr)
+        await rec._handle_success(shazam, audio=object())
+        assert rec._current.spotify_id == "sp123"
+
+    asyncio.run(scenario())
+
+
+def test_acr_priority_carries_spotify_id_even_when_position_rejected():
+    """Same recording but the position disagrees beyond tolerance: keep Shazam's
+    position, but still attach ACR's Spotify id so lyrics target the right
+    variant."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(tolerance=5.0)
+        shazam = make(10, 1000.0)
+        acr = make(40, 1000.0); acr.provider = "acrcloud"; acr.spotify_id = "sp999"
+        rec._acrcloud = _StubACR(acr)
+        await rec._handle_success(shazam, audio=object())
+        assert rec._acr_anchored is False          # position NOT adopted
+        assert rec._current is shazam              # Shazam position kept
+        assert rec._current.spotify_id == "sp999"  # but Spotify id carried over
+
+    asyncio.run(scenario())
+
+
 def test_acr_priority_adopts_and_freezes_position():
     """ACR priority ON: a new Shazam track triggers exactly one ACRCloud lookup;
     an agreeing ACR position is adopted and frozen so later Shazam reads (even

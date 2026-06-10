@@ -107,6 +107,36 @@ def test_parallel_fetch_selects_best(tmp_path=None):
     assert data.line_synced[0][1] == "mxm line"
 
 
+def test_spotify_id_passed_only_to_providers_that_accept_it():
+    """A Spotify track id (from ACRCloud) must reach providers whose get_lyrics
+    accepts ``spotify_id`` (Musixmatch) and be silently ignored by those that
+    don't — without raising a TypeError."""
+    import asyncio
+
+    seen = {}
+
+    class _SpotifyAware:
+        name, priority, enabled = "musixmatch", 3, True
+        async def get_lyrics(self, a, t, al=None, d=None, spotify_id=None):
+            seen["mxm"] = spotify_id
+            return {"lyrics": [(0.0, "mxm")]}
+
+    class _Plain:
+        name, priority, enabled = "lrclib", 2, True
+        async def get_lyrics(self, a, t, al=None, d=None):
+            seen["lrc"] = True            # would TypeError if spotify_id forced in
+            return {"lyrics": [(0.0, "lrc")]}
+
+    svc = service()
+    svc.providers = [_Plain(), _SpotifyAware()]
+    svc._by_name = {p.name: p for p in svc.providers}
+
+    asyncio.run(svc.fetch("A", f"SpotifyTitle-{uuid.uuid4()}",
+                          spotify_id="abc123"))
+    assert seen["mxm"] == "abc123"        # aware provider got the id
+    assert seen.get("lrc") is True        # plain provider ran, no crash
+
+
 def test_lines_around():
     data = LyricsData(artist="A", title="B", line_synced=[
         (0.0, "one"), (5.0, "two"), (10.0, "three"),

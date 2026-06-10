@@ -155,6 +155,12 @@ class ACRCloudRecognizer:
         isrc = (track.get("external_ids") or {}).get("isrc")
         score = track.get("score", 50)
         duration = track.get("duration_ms")
+        # ACRCloud uniquely identifies the exact recording via a Spotify track id
+        # (Shazam does not expose one). It's used downstream to pin lyrics to the
+        # right variant — radio often plays an edit/remaster that fuzzy title
+        # search mismatches.
+        spotify = (track.get("external_metadata") or {}).get("spotify") or {}
+        spotify_id = (spotify.get("track") or {}).get("id")
 
         return RecognitionResult(
             title=track.get("title", "Unknown"),
@@ -166,4 +172,5 @@ class ACRCloudRecognizer:
             isrc=isrc,
             duration=duration / 1000.0 if duration else None,
             provider="acrcloud",
+            spotify_id=spotify_id,
         )

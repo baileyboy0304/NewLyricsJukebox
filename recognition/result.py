@@ -24,6 +24,7 @@ class RecognitionResult:
     isrc: Optional[str] = None
     duration: Optional[float] = None
     provider: str = "shazam"      # "shazam" | "acrcloud"
+    spotify_id: Optional[str] = None  # ACRCloud-supplied Spotify track id, if any
 
     def get_current_position(self) -> float:
         """Latency-compensated current position (offset + wall-clock elapsed)."""
