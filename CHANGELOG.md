@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.43
+
+- **🧪 "Bad match" button — reject the wrong lyrics version and re-search (Phase 2).**
+  A new sad-face button sits next to the +/- lyrics-provider controls. When the
+  engine finds the wrong variant of a song (common on radio — an edit/remaster
+  matching the album cut's lyrics), press it to re-search. Each press advances to
+  the next, more-aggressively-cleaned title variant — stripping version noise
+  (`(Radio Edit)`, `- Remastered 2011`, `(Live ...)`, `(From the Film ...)`) and
+  then featured artists (`feat. ...`, secondary artists) — and swaps in the
+  alternate. The chosen level is remembered per song (persisted), so a recall
+  reuses it. When there are no cleaner variants left, the UI briefly shows "No
+  other version found". New `POST /bad-match` endpoint; one INFO log line per
+  rescue with the cleaned search terms.
+
 ## 1.0.42
 
 - **🧪 ACRCloud Spotify track id → exact-recording lyrics (Phase 1).** When ACR
