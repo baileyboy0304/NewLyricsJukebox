@@ -66,15 +66,21 @@ class ACRCloudRecognizer:
 
     # -- availability ------------------------------------------------------ #
 
-    def is_available(self) -> bool:
+    def unavailable_reason(self) -> Optional[str]:
+        """Why ACRCloud can't be used right now, or ``None`` if it can. Lets
+        callers log a precise cause instead of a vague 'quota/cooldown'."""
         if not self._enabled:
-            return False
+            return "not configured (set acrcloud_host / access_key / access_secret)"
         self._reset_if_new_day()
         if self._requests_today >= self._daily_limit:
-            return False
-        if (time.time() - self._last_request_time) < self._cooldown:
-            return False
-        return True
+            return "daily quota reached (%d/%d)" % (self._requests_today, self._daily_limit)
+        remaining = self._cooldown - (time.time() - self._last_request_time)
+        if remaining > 0:
+            return "cooling down (%.0fs left)" % remaining
+        return None
+
+    def is_available(self) -> bool:
+        return self.unavailable_reason() is None
 
     def stats(self) -> dict:
         return {

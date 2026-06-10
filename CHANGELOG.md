@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.0.41
+
+- **ACRCloud is no longer a Shazam fallback at all — it is used exclusively for
+  the single-shot "ACR priority" refinement.** Routine recognition is now Shazam
+  only; a Shazam no-match simply reports no track and never calls ACRCloud, so
+  adverts / DJ talk / silence can never burn an ACRCloud credit. ACRCloud is spent
+  only when ACR priority is on, once per newly-detected track, to refine the
+  position. (Supersedes 1.0.40, which only suppressed the fallback while ACR
+  priority was on.) `_recognize_once` is reduced to a single Shazam call and the
+  engine docstring updated to match.
+
+## 1.0.40
+
+- **🧪 ACR priority — stop wasting ACRCloud on non-music (fixes the high
+  no-result rate).** While ACR priority is on, ACRCloud is now reserved purely for
+  the one-shot per-track refinement and is no longer used as the blind Shazam
+  *fallback*. The fallback was firing on every Shazam no-match — i.e. on adverts,
+  DJ talk and the silence between songs — which burned the daily quota on
+  non-music (most of the "No Result" lookups on the ACRCloud dashboard) and left
+  ACRCloud in its 30s cooldown right when the next real song change wanted its
+  refinement (hence the frequent "ACRCloud unavailable (quota/cooldown)"). With
+  this change, ACR priority spends roughly one lookup per *track*, on
+  Shazam-confirmed music. When ACR priority is **off**, the original Shazam →
+  ACRCloud fallback chain is unchanged.
+- **🧪 ACR priority — accept cosmetic title variants.** ACRCloud and Shazam often
+  label the same recording slightly differently (e.g. Shazam "It Must Have Been
+  Love" vs ACRCloud "It Must Have Been Love (From the Film 'Pretty Woman')"). The
+  refinement now treats them as the same recording when the artist matches and one
+  title is a prefix of the other, so a valid position isn't discarded over a
+  suffix. Genuinely different tracks (different artist/title) are still rejected.
+
 ## 1.0.39
 
 - **🧪 TEST FEATURE — "ACR priority" (one ACRCloud lookup per track).** New

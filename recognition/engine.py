@@ -1,8 +1,14 @@
-"""Per-player recognition engine: Shazam -> ACRCloud chain + lock cycle.
+"""Per-player recognition engine: Shazam recognition + lock cycle.
 
 Each selected player gets its own ``PlayerRecognizer`` (proper per-player state,
 not swapped module globals — AUDIT.md cluster D). The "3 attempts before locked"
 position consensus lives in ``LockTracker`` so it can be unit-tested in isolation.
+
+Routine recognition is **Shazam only**. ACRCloud is used solely for the optional
+single-shot "ACR priority" refinement: when enabled, each newly-detected track
+gets exactly one ACRCloud lookup to refine the Shazam position, after which the
+position is frozen for the rest of the track. ACRCloud is never used as a Shazam
+fallback, so a no-match (advert / DJ talk / silence) never spends a credit.
 """
 
 import asyncio
@@ -22,6 +28,23 @@ _PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 # Safety net so a hung Shazam/ACRCloud network call can never stall a recognition
 # cycle. Shazam is normally <3s and the whole chain well under this.
 RECOGNIZE_TIMEOUT = 10.0
+
+
+def _same_recording(a: RecognitionResult, b: RecognitionResult) -> bool:
+    """Looser track equality used only by the ACR refinement. Shazam and ACRCloud
+    routinely label the same recording slightly differently — e.g. Shazam's "It
+    Must Have Been Love" vs ACRCloud's "It Must Have Been Love (From the Film
+    'Pretty Woman')". Treat them as the same recording when the artist matches and
+    one title is a prefix of the other, so a valid position isn't thrown away over
+    a cosmetic suffix. (RecognitionResult.is_same_song stays strict for the main
+    song-change detection.)"""
+    na = (a.artist or "").strip().lower()
+    nb = (b.artist or "").strip().lower()
+    if not na or na != nb:
+        return False
+    ta = (a.title or "").strip().lower()
+    tb = (b.title or "").strip().lower()
+    return bool(ta) and (ta == tb or ta.startswith(tb) or tb.startswith(ta))
 
 
 class LockTracker:
@@ -190,10 +213,11 @@ class PlayerRecognizer:
     # -- recognition chain ------------------------------------------------- #
 
     async def _recognize_once(self, audio) -> Optional[RecognitionResult]:
-        result = await self._shazam.recognize(audio)
-        if result is None and self._acrcloud.is_available():
-            result = await self._acrcloud.recognize(audio)
-        return result
+        # Routine recognition is Shazam ONLY. ACRCloud is never used as a fallback
+        # here — it is reserved exclusively for the single-shot per-track position
+        # refinement (see ``_apply_acr_priority``), so a Shazam no-match on an
+        # advert / DJ talk / silence never burns an ACRCloud credit.
+        return await self._shazam.recognize(audio)
 
     def _log_outcome(self, msg, *args):
         """INFO-log a recognition outcome, throttled so a long run of the same
@@ -280,9 +304,10 @@ class PlayerRecognizer:
         shazam = self._current
         if shazam is None:
             return
-        if not self._acrcloud.is_available():
-            logger.info("ACR priority: ACRCloud unavailable (quota/cooldown) — "
-                        "keeping Shazam position for this track")
+        reason = self._acrcloud.unavailable_reason()
+        if reason:
+            logger.info("ACR priority: ACRCloud unavailable (%s) — "
+                        "keeping Shazam position for this track", reason)
             return
         try:
             acr = await asyncio.wait_for(
@@ -296,7 +321,7 @@ class PlayerRecognizer:
         if acr is None:
             logger.info("ACR priority: no ACRCloud match — keeping Shazam position")
             return
-        if not acr.is_same_song(shazam):
+        if not _same_recording(acr, shazam):
             logger.info("ACR priority: ACRCloud matched a different track "
                         "(%s - %s) — keeping Shazam position", acr.artist, acr.title)
             return
