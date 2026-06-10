@@ -59,6 +59,14 @@ class SpotifyLyrics(LyricsProvider):
         # Initialize API settings from config
         self.api_url = config.get('base_url', 'https://spotify-lyrics-api-azure.vercel.app')
         self.sp_dc = SPOTIFY.get("sp_dc", "")
+        # Make it obvious at boot which lyrics path is active (the dead public proxy
+        # vs the direct sp_dc method), so a missing/empty sp_dc cookie is visible.
+        if self.sp_dc:
+            logger.info("Spotify lyrics: direct sp_dc method (cookie configured)")
+        else:
+            logger.warning("Spotify lyrics: no sp_dc cookie set — falling back to the "
+                           "public proxy, which is unreliable (set 'Spotify sp_dc cookie' "
+                           "in the add-on options to fetch lyrics directly)")
         # NOTE: We use get_shared_spotify_client() lazily in get_lyrics() instead of storing
         # an instance here. This ensures all API calls use the singleton instance and
         # statistics are consolidated across the entire app.

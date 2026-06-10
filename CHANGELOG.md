@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.38
+
+- **Log the Spotify lyrics auth path at boot.** It was invisible whether the
+  `sp_dc` cookie was actually picked up. Startup now logs either "direct sp_dc
+  method (cookie configured)" or a warning that no `sp_dc` cookie is set and it's
+  falling back to the unreliable public proxy — so a missing/empty cookie is
+  obvious in the log.
+
 ## 1.0.37
 
 - **Spotify lyrics fetched directly with an `sp_dc` cookie — no third-party
