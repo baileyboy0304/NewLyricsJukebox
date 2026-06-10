@@ -210,6 +210,34 @@ def test_set_bad_match_index_persists():
     assert svc._read_db(artist, title)["bad_match_index"] == 2
 
 
+def test_isrc_passed_only_to_providers_that_accept_it():
+    """Shazam's ISRC must reach providers that accept ``isrc`` (Musixmatch) and be
+    ignored by those that don't — alongside any Spotify id, without TypeErrors."""
+    import asyncio
+
+    seen = {}
+
+    class _Aware:
+        name, priority, enabled = "musixmatch", 3, True
+        async def get_lyrics(self, a, t, al=None, d=None, spotify_id=None, isrc=None):
+            seen["mxm"] = (spotify_id, isrc)
+            return {"lyrics": [(0.0, "m")]}
+
+    class _Plain:
+        name, priority, enabled = "lrclib", 2, True
+        async def get_lyrics(self, a, t, al=None, d=None):
+            seen["lrc"] = True
+            return {"lyrics": [(0.0, "l")]}
+
+    svc = service()
+    svc.providers = [_Plain(), _Aware()]
+    svc._by_name = {p.name: p for p in svc.providers}
+    asyncio.run(svc.fetch("A", f"IsrcTitle-{uuid.uuid4()}",
+                          spotify_id="sp1", isrc="GBAYE0300938"))
+    assert seen["mxm"] == ("sp1", "GBAYE0300938")
+    assert seen.get("lrc") is True
+
+
 def test_lines_around():
     data = LyricsData(artist="A", title="B", line_synced=[
         (0.0, "one"), (5.0, "two"), (10.0, "three"),

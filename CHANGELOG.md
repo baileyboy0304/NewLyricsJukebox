@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.44
+
+- **🧪 Smarter same-recording match (ACR priority).** Shazam and ACRCloud often
+  label the same recording with different variant suffixes — e.g. Shazam "Lady
+  Love Me (One More Time)" vs ACRCloud "Lady Love Me (2003 Remaster)" — which the
+  old prefix check rejected as a *different track*, throwing away ACR's position
+  and Spotify id. Version noise (remaster / edit / live / radio edit / ...) is now
+  stripped from both titles before comparing, so genuine variants match and the
+  refinement is used. Genuinely different songs are still rejected. The
+  title/artist cleaning is shared (`text_clean.py`) between this check and the
+  'bad match' re-search so they always agree.
+- **🧪 ISRC-guided lyrics (Shazam).** Shazam doesn't expose a Spotify URI, but it
+  usually returns an **ISRC** (the recording's unique code), which we already
+  capture. It's now passed to Musixmatch (`track_isrc`) alongside any Spotify id,
+  pinning lyrics to the right recording on *every* Shazam match — no ACRCloud
+  needed. Providers that don't support ISRC ignore it.
+
 ## 1.0.43
 
 - **🧪 "Bad match" button — reject the wrong lyrics version and re-search (Phase 2).**

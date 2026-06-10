@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Tuple
 
 from config import DATABASE_DIR, FEATURES, LYRICS
 from providers import available_providers
+from text_clean import strip_features, strip_version_noise
 
 logger = logging.getLogger(__name__)
 
@@ -42,38 +43,10 @@ def _accepts(fn, name: str) -> bool:
 
 # --- "bad match" rescue: progressively cleaned search variants --------------- #
 
-# Version/edit noise a fuzzy lyrics search trips over (radio often plays an edit
-# or remaster while the lyrics DB has the album cut). Stripped at rescue level 1.
-_VERSION_NOISE = re.compile(
-    r"\s*[\(\[][^\)\]]*\b("
-    r"radio edit|edit|remaster(?:ed)?|re-?recorded|version|mix|live|acoustic|"
-    r"mono|stereo|deluxe|bonus|single|demo|instrumental|from the film|"
-    r"from the motion picture|original|explicit|clean"
-    r")\b[^\)\]]*[\)\]]"
-    r"|\s*-\s*\b("
-    r"radio edit|.*remaster(?:ed)?.*|.*\bversion\b.*|.*\bmix\b.*|live|acoustic|"
-    r"single version|mono|stereo"
-    r")\s*$",
-    re.IGNORECASE,
-)
-# Featured-artist noise, stripped at rescue level 2.
-_FEATURES = re.compile(r"\s*[\(\[]?\b(feat\.?|ft\.?|featuring|with)\b.*$", re.IGNORECASE)
-
-
-def _strip_version_noise(text: str) -> str:
-    out = text or ""
-    prev = None
-    while prev != out:           # repeat: "Song (Live) (Remastered)" -> "Song"
-        prev = out
-        out = _VERSION_NOISE.sub("", out).strip()
-    return re.sub(r"\s{2,}", " ", out).strip() or (text or "").strip()
-
-
-def _strip_features(text: str) -> str:
-    out = _FEATURES.sub("", text or "").strip()
-    # An artist field can also list collaborators with separators.
-    out = re.split(r"\s*(?:,|&|;|/| x | vs\.? )\s*", out, maxsplit=1)[0].strip()
-    return out or (text or "").strip()
+# Title/artist cleaning lives in text_clean so recognition (same-recording check)
+# and lyrics (re-search variants) agree on what counts as "version noise".
+_strip_version_noise = strip_version_noise
+_strip_features = strip_features
 
 
 def alternate_queries(artist: str, title: str) -> List[Tuple[str, str]]:
@@ -216,7 +189,8 @@ class LyricsService:
 
     async def fetch_provider(self, artist: str, title: str, provider: str,
                              album: str = None, duration: int = None,
-                             on_update=None, spotify_id: str = None) -> Optional[LyricsData]:
+                             on_update=None, spotify_id: str = None,
+                             isrc: str = None) -> Optional[LyricsData]:
         """On-demand fetch from ONE provider (when the user cycles to a provider
         not yet in the song's cache, e.g. a provider enabled after the song was
         first cached). Logs the outcome and caches any lyrics. ``on_update(data,
@@ -224,7 +198,8 @@ class LyricsService:
         p = self._by_name.get(provider)
         if p is None or not p.enabled:
             return None
-        raw, err = await self._run_provider(p, artist, title, album, duration, spotify_id)
+        raw, err = await self._run_provider(p, artist, title, album, duration,
+                                            spotify_id, isrc)
         line, meta, word = _normalize_result(raw)
         self._log_provider_outcome(provider, artist, title, line, word, err)
         if line or word:
@@ -351,17 +326,23 @@ class LyricsService:
 
     # -- fetch ------------------------------------------------------------- #
 
-    async def _run_named(self, provider, artist, title, album, duration, spotify_id=None):
-        raw, err = await self._run_provider(provider, artist, title, album, duration, spotify_id)
+    async def _run_named(self, provider, artist, title, album, duration,
+                         spotify_id=None, isrc=None):
+        raw, err = await self._run_provider(provider, artist, title, album, duration,
+                                            spotify_id, isrc)
         return provider, raw, err
 
-    async def _run_provider(self, provider, artist, title, album, duration, spotify_id=None):
+    async def _run_provider(self, provider, artist, title, album, duration,
+                            spotify_id=None, isrc=None):
         """Run one provider, returning (raw_result, error). The error is surfaced
         (not swallowed) so the caller can log per-provider failures. ``spotify_id``
-        is passed only to providers whose ``get_lyrics`` accepts it (Musixmatch)."""
+        and ``isrc`` are passed only to providers whose ``get_lyrics`` accepts them
+        (Musixmatch) — exact-recording match hints."""
         kwargs = {}
         if spotify_id and _accepts(provider.get_lyrics, "spotify_id"):
             kwargs["spotify_id"] = spotify_id
+        if isrc and _accepts(provider.get_lyrics, "isrc"):
+            kwargs["isrc"] = isrc
         try:
             if asyncio.iscoroutinefunction(provider.get_lyrics):
                 return await provider.get_lyrics(artist, title, album, duration, **kwargs), None
@@ -384,7 +365,8 @@ class LyricsService:
     async def fetch(self, artist: str, title: str, album: str = None,
                     duration: int = None, on_update=None,
                     spotify_id: str = None, search_artist: str = None,
-                    search_title: str = None, force: bool = False) -> LyricsData:
+                    search_title: str = None, force: bool = False,
+                    isrc: str = None) -> LyricsData:
         """Look up lyrics for a track. Returns the best selection.
 
         Uses the cache when present; otherwise queries all enabled providers in
@@ -438,7 +420,7 @@ class LyricsService:
             # Each task returns (provider, raw) so we don't rely on identifying
             # the originating task (as_completed yields wrappers, not the tasks).
             tasks = [asyncio.create_task(
-                        self._run_named(p, sa, st, album, duration, spotify_id))
+                        self._run_named(p, sa, st, album, duration, spotify_id, isrc))
                      for p in enabled]
             for fut in asyncio.as_completed(tasks):
                 provider, raw, err = await fut
@@ -447,7 +429,8 @@ class LyricsService:
                 apply(provider.name, line, meta, word)
         else:
             for p in enabled:
-                raw, err = await self._run_provider(p, sa, st, album, duration, spotify_id)
+                raw, err = await self._run_provider(p, sa, st, album, duration,
+                                                    spotify_id, isrc)
                 line, meta, word = _normalize_result(raw)
                 self._log_provider_outcome(p.name, artist, title, line, word, err)
                 apply(p.name, line, meta, word)

@@ -369,6 +369,10 @@ class Controller:
             # ACRCloud (ACR priority) may supply a Spotify track id — used to pin
             # lyrics to the exact recording (radio edits/remasters).
             "spotify_id": getattr(result, "spotify_id", None),
+            # Shazam usually supplies an ISRC (the recording's unique code) — a
+            # second way to pin lyrics to the right recording, available on every
+            # Shazam match (no ACR needed).
+            "isrc": getattr(result, "isrc", None),
         }
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         runtime.track = track
@@ -412,7 +416,7 @@ class Controller:
 
     async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album,
                                duration, spotify_id=None, search_artist=None,
-                               search_title=None, force=False):
+                               search_title=None, force=False, isrc=None):
         def on_update(data):
             if runtime.lyrics_key == lyrics_key:   # ignore if track changed
                 runtime.lyrics = data
@@ -424,7 +428,8 @@ class Controller:
             await self.lyrics_service.fetch(artist, title, album, duration,
                                             on_update=on_update, spotify_id=spotify_id,
                                             search_artist=search_artist,
-                                            search_title=search_title, force=force)
+                                            search_title=search_title, force=force,
+                                            isrc=isrc)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -445,6 +450,7 @@ class Controller:
                 (runtime.track.get("duration_ms") or 0) // 1000 or None,
                 on_update=on_update,
                 spotify_id=runtime.track.get("spotify_id"),
+                isrc=runtime.track.get("isrc"),
             )
         except asyncio.CancelledError:
             raise
@@ -501,6 +507,7 @@ class Controller:
                 (runtime.track.get("duration_ms") or 0) // 1000 or None,
                 runtime.track.get("spotify_id"),
                 search_artist=sa, search_title=st,
+                isrc=runtime.track.get("isrc"),
             ))
 
         # The +/- buttons cycle through ALL enabled providers (not only those with
@@ -576,7 +583,8 @@ class Controller:
             runtime.track.get("album"),
             (runtime.track.get("duration_ms") or 0) // 1000 or None,
             runtime.track.get("spotify_id"),
-            search_artist=sa, search_title=st, force=True))
+            search_artist=sa, search_title=st, force=True,
+            isrc=runtime.track.get("isrc")))
         logger.info("bad-match: %s - %s -> variant %d/%d ('%s - %s')",
                     artist, title, next_index, len(variants) - 1, sa, st)
         return {"ok": True, "index": next_index, "search": f"{sa} - {st}"}

@@ -231,7 +231,7 @@ class MusixmatchProvider(LyricsProvider):
     
     def get_lyrics(self, artist: str, title: str, album: str = None,
                    duration: int = None, spotify_id: str = None,
-                   _retry: bool = True) -> Optional[Dict[str, Any]]:
+                   isrc: str = None, _retry: bool = True) -> Optional[Dict[str, Any]]:
         """
         Get lyrics using Musixmatch Desktop API.
         
@@ -281,14 +281,19 @@ class MusixmatchProvider(LyricsProvider):
                 params["q_duration"] = str(duration)
                 params["f_subtitle_length"] = str(duration)
 
-            # When a Spotify track id is known (from ACRCloud), match the EXACT
-            # recording by its Spotify URI instead of a fuzzy artist/title search.
-            # This avoids picking the wrong variant (radio edit / remaster / live)
-            # that a text search can land on. Musixmatch expects the full URI.
+            # Exact-recording hints: match by Spotify track id (from ACRCloud)
+            # and/or ISRC (from Shazam) instead of a fuzzy artist/title search,
+            # which can land on the wrong variant (radio edit / remaster / live).
+            hint = ""
             if spotify_id:
                 uri = spotify_id if spotify_id.startswith("spotify:") else f"spotify:track:{spotify_id}"
                 params["track_spotify_id"] = uri
-                logger.info(f"Musixmatch - Searching by Spotify id {uri} ({artist} - {title})")
+                hint = f" by Spotify id {uri}"
+            if isrc:
+                params["track_isrc"] = isrc
+                hint += f"{' +' if hint else ' by'} ISRC {isrc}"
+            if hint:
+                logger.info(f"Musixmatch - Searching{hint} ({artist} - {title})")
             else:
                 logger.info(f"Musixmatch - Searching: {artist} - {title}")
             
@@ -311,7 +316,7 @@ class MusixmatchProvider(LyricsProvider):
                     logger.info("Musixmatch - Token expired, refreshing...")
                     self._token = None
                     self._token_expires = 0
-                    return self.get_lyrics(artist, title, album, duration, spotify_id, _retry=False)
+                    return self.get_lyrics(artist, title, album, duration, spotify_id, isrc, _retry=False)
                 elif hint == "captcha":
                     logger.warning("Musixmatch - Captcha required (rate limited)")
                     return None
@@ -339,12 +344,12 @@ class MusixmatchProvider(LyricsProvider):
                 logger.warning("Musixmatch - Token invalid, refreshing...")
                 self._token = None
                 self._token_expires = 0
-                return self.get_lyrics(artist, title, album, duration, spotify_id, _retry=False)
+                return self.get_lyrics(artist, title, album, duration, spotify_id, isrc, _retry=False)
             elif track_status >= 500 and _retry:
                 # API-level server error - retry once
                 logger.warning(f"Musixmatch - API server error ({track_status}), retrying...")
                 time.sleep(2)
-                return self.get_lyrics(artist, title, album, duration, spotify_id, _retry=False)
+                return self.get_lyrics(artist, title, album, duration, spotify_id, isrc, _retry=False)
             elif track_status != 200:
                 logger.info(f"Musixmatch - Track match failed: status {track_status}")
                 return None
