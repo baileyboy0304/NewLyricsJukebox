@@ -139,6 +139,11 @@ class PlayerRecognizer:
         self._interval = AUDIO_RECOGNITION["recognition_interval"]
         self._capture_duration = AUDIO_RECOGNITION["capture_duration"]
         self._latency_offset = AUDIO_RECOGNITION["latency_offset"]
+        # TEST FEATURE — ACR priority: one ACRCloud refinement per track, then the
+        # position is frozen and Shazam only confirms the track (see config.py).
+        self._acr_priority = AUDIO_RECOGNITION["acr_priority"]
+        self._acr_tolerance = AUDIO_RECOGNITION["acr_priority_tolerance"]
+        self._acr_anchored = False   # is the current track's position ACR-locked?
         # Clear the held track after this many consecutive no-matches so the UI
         # can fade the metadata away between songs (default 1 = immediate).
         self._blank_after = max(1, AUDIO_RECOGNITION.get("blank_after_failures", 1))
@@ -224,7 +229,7 @@ class PlayerRecognizer:
                         self._log_outcome("no match (audio level=%d)%s", level, hint)
                         await self._handle_failure()
                     else:
-                        self._handle_success(result)
+                        await self._handle_success(result, audio)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -234,15 +239,24 @@ class PlayerRecognizer:
             # server stops responding).
             await asyncio.sleep(self._interval)
 
-    def _handle_success(self, result: RecognitionResult):
+    async def _handle_success(self, result: RecognitionResult, audio=None):
         self._failures = 0
         self._paused = False
-        if not result.is_same_song(self._current):
+        new_song = not result.is_same_song(self._current)
+        if new_song:
             self._lock.reset()
+            self._acr_anchored = False
             status = self._lock.offer(result)  # "initial"
             self._current = result
             logger.info("Song changed to: %s - %s @ %.1fs",
                         result.artist, result.title, result.get_current_position())
+        elif self._acr_anchored:
+            # ACR priority: this track's position is frozen to the ACRCloud anchor;
+            # Shazam reads only re-confirm the track and never move the clock. The
+            # served position keeps advancing on its own (offset + wall-clock).
+            logger.debug("ACR priority: Shazam re-confirmed %s - %s; position held at %.1fs",
+                         result.artist, result.title, self._current.get_current_position())
+            return
         else:
             status = self._lock.offer(result)
             if status not in ("ignored", "outlier"):
@@ -250,6 +264,57 @@ class PlayerRecognizer:
                 # 'ignored'/'outlier' -> hold the current position unchanged.
                 self._current = result
         self._log_recognition(result, status)
+        if self._on_update:
+            self._on_update(self)
+        # ACR priority: on a song change, spend ONE ACRCloud lookup to refine the
+        # Shazam position. Done after the Shazam line is logged/served so the UI
+        # shows lyrics immediately and the refinement (if any) follows.
+        if new_song and self._acr_priority and audio is not None:
+            await self._apply_acr_priority(audio)
+
+    async def _apply_acr_priority(self, audio):
+        """One ACRCloud lookup for the freshly-detected track. If ACR agrees with
+        Shazam (same track, position within tolerance) adopt ACR's position and
+        freeze it for the rest of the track. Otherwise keep Shazam and behave
+        normally. Exactly one ACR request is spent per track — never wasted."""
+        shazam = self._current
+        if shazam is None:
+            return
+        if not self._acrcloud.is_available():
+            logger.info("ACR priority: ACRCloud unavailable (quota/cooldown) — "
+                        "keeping Shazam position for this track")
+            return
+        try:
+            acr = await asyncio.wait_for(
+                self._acrcloud.recognize(audio), timeout=RECOGNIZE_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.info("ACR priority: ACRCloud timed out — keeping Shazam position")
+            return
+        # A late song change mid-lookup means this ACR result is for the old audio.
+        if shazam is not self._current:
+            return
+        if acr is None:
+            logger.info("ACR priority: no ACRCloud match — keeping Shazam position")
+            return
+        if not acr.is_same_song(shazam):
+            logger.info("ACR priority: ACRCloud matched a different track "
+                        "(%s - %s) — keeping Shazam position", acr.artist, acr.title)
+            return
+        delta = ((acr.offset - acr.capture_start_time)
+                 - (shazam.offset - shazam.capture_start_time))
+        if abs(delta) > self._acr_tolerance:
+            logger.info("ACR priority: ACRCloud position differs by %+.1fs "
+                        "(> %.1fs tolerance) — keeping Shazam position",
+                        delta, self._acr_tolerance)
+            return
+        # Adopt ACR's position; keep Shazam's richer artwork if ACR lacks it.
+        if not acr.album_art_url and shazam.album_art_url:
+            acr.album_art_url = shazam.album_art_url
+        self._current = acr
+        self._acr_anchored = True
+        logger.info("ACR priority: refined position by %+.1fs via ACRCloud "
+                    "(now %.1fs) — locked for this track",
+                    delta, acr.get_current_position())
         if self._on_update:
             self._on_update(self)
 

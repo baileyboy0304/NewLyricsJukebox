@@ -151,6 +151,104 @@ def test_recognition_call_times_out_and_loop_continues():
     asyncio.run(scenario())
 
 
+def _acr_recognizer(priority=True, tolerance=5.0):
+    """Build a PlayerRecognizer with stubbed Shazam/ACR for ACR-priority tests."""
+    from recognition.engine import PlayerRecognizer
+
+    rec = PlayerRecognizer("acr", capture=object())
+    rec._acr_priority = priority
+    rec._acr_tolerance = tolerance
+    return rec
+
+
+class _StubACR:
+    def __init__(self, result, available=True):
+        self._result = result
+        self._available = available
+        self.calls = 0
+
+    def is_available(self):
+        return self._available
+
+    async def recognize(self, audio):
+        self.calls += 1
+        return self._result
+
+
+def test_acr_priority_adopts_and_freezes_position():
+    """ACR priority ON: a new Shazam track triggers exactly one ACRCloud lookup;
+    an agreeing ACR position is adopted and frozen so later Shazam reads (even
+    wildly different ones) never move the clock."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(tolerance=5.0)
+        shazam = make(10, 1000.0)                  # same capture window as ACR
+        acr = make(13, 1000.0); acr.provider = "acrcloud"  # +3s, within tolerance
+        rec._acrcloud = _StubACR(acr)
+
+        await rec._handle_success(shazam, audio=object())
+        assert rec._acrcloud.calls == 1            # exactly one ACR lookup
+        assert rec._acr_anchored is True
+        assert rec._current is acr                 # ACR position adopted
+
+        # A later, very different Shazam read for the same song must be ignored.
+        await rec._handle_success(make(90, 1000.0), audio=object())
+        assert rec._acrcloud.calls == 1            # no second ACR spend
+        assert rec._current is acr                 # position still frozen on ACR
+
+    asyncio.run(scenario())
+
+
+def test_acr_priority_rejects_disagreeing_position():
+    """ACR priority ON but the ACR position disagrees beyond tolerance: keep the
+    Shazam position and do NOT freeze (normal lock behaviour resumes)."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(tolerance=5.0)
+        shazam = make(10, 1000.0)
+        acr = make(40, 1000.0); acr.provider = "acrcloud"  # +30s, beyond tolerance
+        rec._acrcloud = _StubACR(acr)
+
+        await rec._handle_success(shazam, audio=object())
+        assert rec._acrcloud.calls == 1
+        assert rec._acr_anchored is False
+        assert rec._current is shazam              # kept Shazam, not ACR
+
+    asyncio.run(scenario())
+
+
+def test_acr_priority_off_never_calls_acrcloud_on_song_change():
+    """ACR priority OFF (default): a new track does NOT spend an ACR lookup."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        rec._acrcloud = _StubACR(make(13, 1000.0))
+        await rec._handle_success(make(10, 1000.0), audio=object())
+        assert rec._acrcloud.calls == 0
+        assert rec._acr_anchored is False
+
+    asyncio.run(scenario())
+
+
+def test_acr_priority_unavailable_keeps_shazam():
+    """ACR priority ON but ACRCloud is out of quota / cooling down: keep Shazam."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer()
+        rec._acrcloud = _StubACR(make(13, 1000.0), available=False)
+        shazam = make(10, 1000.0)
+        await rec._handle_success(shazam, audio=object())
+        assert rec._acrcloud.calls == 0            # not spent when unavailable
+        assert rec._acr_anchored is False
+        assert rec._current is shazam
+
+    asyncio.run(scenario())
+
+
 def test_loop_does_not_starve_event_loop_when_no_stream():
     """Regression: a recognizer whose stream key doesn't exist must still yield
     each cycle, or it busy-loops and freezes the whole asyncio app (and the web

@@ -153,6 +153,15 @@ AUDIO_RECOGNITION = {
     # cleared (the UI then fades to just the transport controls). Default 1 so the
     # screen blanks immediately when a song ends / an advert starts.
     "blank_after_failures": _as_int(conf("blank_after_failures", 1), 1),
+    # --- TEST FEATURE: ACR priority (one ACRCloud refinement per track) ---
+    # When ON, each newly-detected track gets exactly ONE ACRCloud lookup to
+    # refine the Shazam position (ACR is assumed more accurate). If the ACR
+    # position agrees with Shazam within ``acr_priority_tolerance`` seconds it is
+    # adopted and FROZEN for the rest of the track — subsequent Shazam reads no
+    # longer move the clock. When OFF the app behaves exactly as before (ACRCloud
+    # is only the fallback when Shazam fails to match). Default OFF.
+    "acr_priority": _as_bool(conf("acr_priority", False), False),
+    "acr_priority_tolerance": _as_float(conf("acr_priority_tolerance", 5.0), 5.0),
 }
 
 ACRCLOUD = {
