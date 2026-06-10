@@ -252,36 +252,21 @@ def test_acr_priority_unavailable_keeps_shazam():
     asyncio.run(scenario())
 
 
-def test_acr_priority_disables_shazam_fallback_to_acrcloud():
-    """With ACR priority ON, a Shazam no-match must NOT fall back to ACRCloud
-    (that wasted quota on adverts/silence and left ACR cooling down at the next
-    song change). ACR is reserved for the one-shot refinement only."""
+def test_acrcloud_never_used_as_shazam_fallback():
+    """Routine recognition is Shazam only. A Shazam no-match must NEVER fall back
+    to ACRCloud — regardless of the ACR-priority switch — so adverts / DJ talk /
+    silence can never burn an ACRCloud credit. ACR is reserved exclusively for the
+    single-shot refinement."""
     import asyncio
 
     async def scenario():
-        rec = _acr_recognizer()                    # priority ON
-        rec._shazam = _StubACR(None)               # Shazam never matches
-        rec._acrcloud = _StubACR(make(5, 0))       # would match if asked
-        result = await rec._recognize_once(object())
-        assert result is None                      # no fallback to ACR
-        assert rec._acrcloud.calls == 0            # ACR not spent on a no-match
-
-    asyncio.run(scenario())
-
-
-def test_acr_fallback_still_used_when_priority_off():
-    """Sanity: with ACR priority OFF the original Shazam -> ACRCloud fallback
-    chain is unchanged."""
-    import asyncio
-
-    async def scenario():
-        rec = _acr_recognizer(priority=False)
-        rec._shazam = _StubACR(None)
-        acr_hit = make(5, 0); acr_hit.provider = "acrcloud"
-        rec._acrcloud = _StubACR(acr_hit)
-        result = await rec._recognize_once(object())
-        assert result is acr_hit                   # fell back to ACRCloud
-        assert rec._acrcloud.calls == 1
+        for priority in (True, False):
+            rec = _acr_recognizer(priority=priority)
+            rec._shazam = _StubACR(None)           # Shazam never matches
+            rec._acrcloud = _StubACR(make(5, 0))   # would match if (wrongly) asked
+            result = await rec._recognize_once(object())
+            assert result is None                  # no fallback to ACR
+            assert rec._acrcloud.calls == 0        # ACR never spent on a no-match
 
     asyncio.run(scenario())
 

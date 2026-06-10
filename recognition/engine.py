@@ -1,8 +1,14 @@
-"""Per-player recognition engine: Shazam -> ACRCloud chain + lock cycle.
+"""Per-player recognition engine: Shazam recognition + lock cycle.
 
 Each selected player gets its own ``PlayerRecognizer`` (proper per-player state,
 not swapped module globals — AUDIT.md cluster D). The "3 attempts before locked"
 position consensus lives in ``LockTracker`` so it can be unit-tested in isolation.
+
+Routine recognition is **Shazam only**. ACRCloud is used solely for the optional
+single-shot "ACR priority" refinement: when enabled, each newly-detected track
+gets exactly one ACRCloud lookup to refine the Shazam position, after which the
+position is frozen for the rest of the track. ACRCloud is never used as a Shazam
+fallback, so a no-match (advert / DJ talk / silence) never spends a credit.
 """
 
 import asyncio
@@ -207,16 +213,11 @@ class PlayerRecognizer:
     # -- recognition chain ------------------------------------------------- #
 
     async def _recognize_once(self, audio) -> Optional[RecognitionResult]:
-        result = await self._shazam.recognize(audio)
-        # ACR priority reserves ACRCloud for the one-shot per-track refinement, so
-        # it must NOT also be spent here as a blind fallback on audio Shazam can't
-        # match (adverts / DJ talk / silence between songs). Doing so burns the
-        # daily quota on non-music AND leaves ACR in cooldown exactly when the next
-        # real song change wants its refinement. When ACR priority is off, the
-        # original Shazam -> ACRCloud fallback chain is unchanged.
-        if result is None and not self._acr_priority and self._acrcloud.is_available():
-            result = await self._acrcloud.recognize(audio)
-        return result
+        # Routine recognition is Shazam ONLY. ACRCloud is never used as a fallback
+        # here — it is reserved exclusively for the single-shot per-track position
+        # refinement (see ``_apply_acr_priority``), so a Shazam no-match on an
+        # advert / DJ talk / silence never burns an ACRCloud credit.
+        return await self._shazam.recognize(audio)
 
     def _log_outcome(self, msg, *args):
         """INFO-log a recognition outcome, throttled so a long run of the same
