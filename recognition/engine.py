@@ -325,6 +325,13 @@ class PlayerRecognizer:
             logger.info("ACR priority: ACRCloud matched a different track "
                         "(%s - %s) — keeping Shazam position", acr.artist, acr.title)
             return
+        # Same recording: carry ACRCloud's Spotify track id onto the served result
+        # so lyrics lookup can pin the exact variant — independent of whether the
+        # position is adopted below.
+        if acr.spotify_id and not shazam.spotify_id:
+            shazam.spotify_id = acr.spotify_id
+            logger.info("ACR priority: Spotify track id %s from ACRCloud "
+                        "(lyrics will target the exact recording)", acr.spotify_id)
         delta = ((acr.offset - acr.capture_start_time)
                  - (shazam.offset - shazam.capture_start_time))
         if abs(delta) > self._acr_tolerance:

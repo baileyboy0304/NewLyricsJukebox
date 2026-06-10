@@ -11,6 +11,7 @@ selected ``LyricsData`` is returned to the caller, who owns per-player state.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -27,6 +28,16 @@ logger = logging.getLogger(__name__)
 
 WORD_SYNC_BOOST = 10
 _db_lock = threading.Lock()
+
+
+def _accepts(fn, name: str) -> bool:
+    """Does ``fn`` accept a keyword argument called ``name``? Lets us pass the
+    optional ``spotify_id`` only to providers that support it (Musixmatch),
+    without changing every provider's signature."""
+    try:
+        return name in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 @dataclass
@@ -132,7 +143,7 @@ class LyricsService:
 
     async def fetch_provider(self, artist: str, title: str, provider: str,
                              album: str = None, duration: int = None,
-                             on_update=None) -> Optional[LyricsData]:
+                             on_update=None, spotify_id: str = None) -> Optional[LyricsData]:
         """On-demand fetch from ONE provider (when the user cycles to a provider
         not yet in the song's cache, e.g. a provider enabled after the song was
         first cached). Logs the outcome and caches any lyrics. ``on_update(data,
@@ -140,7 +151,7 @@ class LyricsService:
         p = self._by_name.get(provider)
         if p is None or not p.enabled:
             return None
-        raw, err = await self._run_provider(p, artist, title, album, duration)
+        raw, err = await self._run_provider(p, artist, title, album, duration, spotify_id)
         line, meta, word = _normalize_result(raw)
         self._log_provider_outcome(provider, artist, title, line, word, err)
         if line or word:
@@ -243,17 +254,22 @@ class LyricsService:
 
     # -- fetch ------------------------------------------------------------- #
 
-    async def _run_named(self, provider, artist, title, album, duration):
-        raw, err = await self._run_provider(provider, artist, title, album, duration)
+    async def _run_named(self, provider, artist, title, album, duration, spotify_id=None):
+        raw, err = await self._run_provider(provider, artist, title, album, duration, spotify_id)
         return provider, raw, err
 
-    async def _run_provider(self, provider, artist, title, album, duration):
+    async def _run_provider(self, provider, artist, title, album, duration, spotify_id=None):
         """Run one provider, returning (raw_result, error). The error is surfaced
-        (not swallowed) so the caller can log per-provider failures."""
+        (not swallowed) so the caller can log per-provider failures. ``spotify_id``
+        is passed only to providers whose ``get_lyrics`` accepts it (Musixmatch)."""
+        kwargs = {}
+        if spotify_id and _accepts(provider.get_lyrics, "spotify_id"):
+            kwargs["spotify_id"] = spotify_id
         try:
             if asyncio.iscoroutinefunction(provider.get_lyrics):
-                return await provider.get_lyrics(artist, title, album, duration), None
-            return await asyncio.to_thread(provider.get_lyrics, artist, title, album, duration), None
+                return await provider.get_lyrics(artist, title, album, duration, **kwargs), None
+            return await asyncio.to_thread(
+                provider.get_lyrics, artist, title, album, duration, **kwargs), None
         except Exception as exc:  # noqa: BLE001
             return None, exc
 
@@ -269,7 +285,8 @@ class LyricsService:
             logger.info("lyrics-provider %s no lyrics for %s - %s", name, artist, title)
 
     async def fetch(self, artist: str, title: str, album: str = None,
-                    duration: int = None, on_update=None) -> LyricsData:
+                    duration: int = None, on_update=None,
+                    spotify_id: str = None) -> LyricsData:
         """Look up lyrics for a track. Returns the best selection.
 
         Uses the cache when present; otherwise queries all enabled providers in
@@ -307,7 +324,8 @@ class LyricsService:
         if FEATURES["parallel_provider_fetch"]:
             # Each task returns (provider, raw) so we don't rely on identifying
             # the originating task (as_completed yields wrappers, not the tasks).
-            tasks = [asyncio.create_task(self._run_named(p, artist, title, album, duration))
+            tasks = [asyncio.create_task(
+                        self._run_named(p, artist, title, album, duration, spotify_id))
                      for p in enabled]
             for fut in asyncio.as_completed(tasks):
                 provider, raw, err = await fut
@@ -316,7 +334,7 @@ class LyricsService:
                 apply(provider.name, line, meta, word)
         else:
             for p in enabled:
-                raw, err = await self._run_provider(p, artist, title, album, duration)
+                raw, err = await self._run_provider(p, artist, title, album, duration, spotify_id)
                 line, meta, word = _normalize_result(raw)
                 self._log_provider_outcome(p.name, artist, title, line, word, err)
                 apply(p.name, line, meta, word)
