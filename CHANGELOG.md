@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.36
+
+- **+/- cycles through every provider, fetching on demand.** The buttons now step
+  through **all enabled** lyrics providers (not only the ones already cached). If a
+  provider has no lyrics yet for the song it is fetched on the spot; if it has none
+  at all, the screen shows "No lyrics from <provider>" and the outcome is logged.
+- **Picked provider is remembered per song.** Choosing a provider with +/- persists
+  it (`preferred_provider`) in the song's DB, so when that song is recalled from
+  cache its lyrics come from the chosen provider — building up a per-song provider
+  preference over time.
+
 ## 1.0.35
 
 - **Spotify lyrics now work with just the client ID + secret.** Previously the

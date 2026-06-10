@@ -143,3 +143,56 @@ def test_lyrics_for_provider_picks_that_provider():
     assert data.line_provider == "netease"
     assert data.line_synced == [(1.0, "netease line")]
     assert svc.lyrics_for_provider("A", "B", db, "qq") is None
+
+
+def test_enabled_provider_names_is_full_cycle_list():
+    """The +/- cycle lists ALL enabled providers, not only those with lyrics."""
+    svc = service()
+    names = svc.enabled_provider_names()
+    assert names[0] == "spotify"            # priority order
+    assert "musixmatch" in names and "lrclib" in names
+
+
+def test_set_preferred_is_used_on_recall():
+    """A picked provider persists and is served when the song is recalled."""
+    import asyncio
+    svc = service()
+
+    class _P:
+        def __init__(s, name, pri, lines):
+            s.name, s.priority, s.enabled, s._lines = name, pri, True, lines
+        async def get_lyrics(s, a, t, al=None, d=None):
+            return {"lyrics": s._lines}
+
+    svc.providers = [_P("spotify", 1, [(0.0, "spot")]), _P("lrclib", 2, [(0.0, "lrc")])]
+    svc._by_name = {p.name: p for p in svc.providers}
+
+    # First play caches both; auto picks spotify (priority 1).
+    data = asyncio.run(svc.fetch("PrefArtist", "PrefTitle"))
+    assert data.line_provider == "spotify"
+
+    # User picks lrclib -> persisted; recall now serves lrclib.
+    svc.set_preferred("PrefArtist", "PrefTitle", "lrclib")
+    recalled = asyncio.run(svc.fetch("PrefArtist", "PrefTitle"))
+    assert recalled.line_provider == "lrclib"
+    assert recalled.line_synced[0][1] == "lrc"
+
+
+def test_fetch_provider_caches_one_provider_on_demand():
+    """Cycling to an un-cached provider fetches just that provider and caches it."""
+    import asyncio
+    svc = service()
+
+    class _P:
+        name, priority, enabled = "netease", 4, True
+        async def get_lyrics(self, a, t, al=None, d=None):
+            return {"lyrics": [(0.0, "netease line")]}
+
+    p = _P()
+    svc.providers = [p]
+    svc._by_name = {p.name: p}
+    data = asyncio.run(svc.fetch_provider("OnDemand", "Song", "netease"))
+    assert data is not None and data.line_provider == "netease"
+    # Now cached for cycling.
+    db = svc.read_db("OnDemand", "Song")
+    assert "netease" in db.get("saved_lyrics", {})
