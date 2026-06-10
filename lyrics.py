@@ -40,6 +40,59 @@ def _accepts(fn, name: str) -> bool:
         return False
 
 
+# --- "bad match" rescue: progressively cleaned search variants --------------- #
+
+# Version/edit noise a fuzzy lyrics search trips over (radio often plays an edit
+# or remaster while the lyrics DB has the album cut). Stripped at rescue level 1.
+_VERSION_NOISE = re.compile(
+    r"\s*[\(\[][^\)\]]*\b("
+    r"radio edit|edit|remaster(?:ed)?|re-?recorded|version|mix|live|acoustic|"
+    r"mono|stereo|deluxe|bonus|single|demo|instrumental|from the film|"
+    r"from the motion picture|original|explicit|clean"
+    r")\b[^\)\]]*[\)\]]"
+    r"|\s*-\s*\b("
+    r"radio edit|.*remaster(?:ed)?.*|.*\bversion\b.*|.*\bmix\b.*|live|acoustic|"
+    r"single version|mono|stereo"
+    r")\s*$",
+    re.IGNORECASE,
+)
+# Featured-artist noise, stripped at rescue level 2.
+_FEATURES = re.compile(r"\s*[\(\[]?\b(feat\.?|ft\.?|featuring|with)\b.*$", re.IGNORECASE)
+
+
+def _strip_version_noise(text: str) -> str:
+    out = text or ""
+    prev = None
+    while prev != out:           # repeat: "Song (Live) (Remastered)" -> "Song"
+        prev = out
+        out = _VERSION_NOISE.sub("", out).strip()
+    return re.sub(r"\s{2,}", " ", out).strip() or (text or "").strip()
+
+
+def _strip_features(text: str) -> str:
+    out = _FEATURES.sub("", text or "").strip()
+    # An artist field can also list collaborators with separators.
+    out = re.split(r"\s*(?:,|&|;|/| x | vs\.? )\s*", out, maxsplit=1)[0].strip()
+    return out or (text or "").strip()
+
+
+def alternate_queries(artist: str, title: str) -> List[Tuple[str, str]]:
+    """Ordered, de-duplicated (artist, title) search variants for the 'bad match'
+    rescue — from no cleaning to most aggressive. Index 0 is always the original;
+    each later entry strips more noise so a different recording can be found."""
+    variants: List[Tuple[str, str]] = [(artist, title)]
+
+    def add(a, t):
+        pair = (a.strip(), t.strip())
+        if pair not in variants and pair[1]:
+            variants.append(pair)
+
+    t1 = _strip_version_noise(title)
+    add(artist, t1)                                  # level 1: drop version noise
+    add(_strip_features(artist), _strip_features(t1))  # level 2: drop features
+    return variants
+
+
 @dataclass
 class LyricsData:
     artist: str
@@ -141,6 +194,26 @@ class LyricsService:
                 logger.warning("Could not persist preferred provider: %s", exc)
         logger.info("lyrics preferred provider for %s - %s -> %s", artist, title, provider)
 
+    def set_bad_match_index(self, artist: str, title: str, index: int) -> None:
+        """Persist the 'bad match' rescue level chosen for this song, so a recall
+        starts from the same cleaned-search variant the user settled on."""
+        if not FEATURES["save_lyrics_locally"]:
+            return
+        path = _db_path(artist, title)
+        with _db_lock:
+            try:
+                db = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                db = {"artist": artist, "title": title, "saved_lyrics": {},
+                      "word_synced_lyrics": {}, "metadata": {}}
+            db["bad_match_index"] = int(index)
+            try:
+                tmp = path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(db, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, path)
+            except OSError as exc:  # pragma: no cover
+                logger.warning("Could not persist bad-match index: %s", exc)
+
     async def fetch_provider(self, artist: str, title: str, provider: str,
                              album: str = None, duration: int = None,
                              on_update=None, spotify_id: str = None) -> Optional[LyricsData]:
@@ -180,6 +253,30 @@ class LyricsService:
             data.word_synced = ws
             data.word_provider = provider
         return data
+
+    def _clear_lyrics(self, artist, title):
+        """Empty a song's cached lyrics (keeping non-lyric keys like
+        ``bad_match_index``) ahead of a forced re-search. Drops any
+        ``preferred_provider`` since the user just rejected that selection."""
+        if not FEATURES["save_lyrics_locally"]:
+            return
+        path = _db_path(artist, title)
+        with _db_lock:
+            try:
+                db = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return
+            db["saved_lyrics"] = {}
+            db["word_synced_lyrics"] = {}
+            db["metadata"] = {}
+            db.pop("preferred_provider", None)
+            db.pop("preferred_word_sync_provider", None)
+            try:
+                tmp = path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(db, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, path)
+            except OSError as exc:  # pragma: no cover
+                logger.warning("Could not clear lyrics DB: %s", exc)
 
     def _write_provider(self, artist, title, provider, line, meta, word):
         if not FEATURES["save_lyrics_locally"]:
@@ -286,7 +383,8 @@ class LyricsService:
 
     async def fetch(self, artist: str, title: str, album: str = None,
                     duration: int = None, on_update=None,
-                    spotify_id: str = None) -> LyricsData:
+                    spotify_id: str = None, search_artist: str = None,
+                    search_title: str = None, force: bool = False) -> LyricsData:
         """Look up lyrics for a track. Returns the best selection.
 
         Uses the cache when present; otherwise queries all enabled providers in
@@ -294,9 +392,14 @@ class LyricsService:
         called each time a provider returns and improves the selection, so the
         UI can show lyrics from the first fast provider (~1s) without waiting for
         slow/failing ones (e.g. QQ retrying a 500 for ~25s).
+
+        ``search_artist`` / ``search_title`` override the terms sent to providers
+        (the DB is always keyed by the original ``artist``/``title``) — used by the
+        'bad match' rescue to re-query with a cleaned title. ``force`` bypasses the
+        cache so a rescue always re-queries and overwrites the cached lyrics.
         """
         cached = self._read_db(artist, title)
-        if cached and cached.get("saved_lyrics"):
+        if not force and cached and cached.get("saved_lyrics"):
             data = self._select(artist, title, cached)
             # Cached song: the per-provider fetch loop below is skipped, so log the
             # cache hit here (otherwise nothing is logged for already-seen songs).
@@ -306,6 +409,16 @@ class LyricsService:
             if on_update:
                 on_update(data)
             return data
+
+        sa = search_artist or artist
+        st = search_title or title
+        if force:
+            # Wipe the rejected lyrics first so only the fresh re-search results
+            # remain (a provider that returns nothing on the cleaned query must not
+            # leave its old, rejected lyrics behind).
+            self._clear_lyrics(artist, title)
+            logger.info("lyrics re-search for %s - %s using '%s - %s' (bad-match rescue)",
+                        artist, title, sa, st)
 
         enabled = [p for p in self.providers if p.enabled]
         data = LyricsData(artist=artist, title=title)
@@ -325,7 +438,7 @@ class LyricsService:
             # Each task returns (provider, raw) so we don't rely on identifying
             # the originating task (as_completed yields wrappers, not the tasks).
             tasks = [asyncio.create_task(
-                        self._run_named(p, artist, title, album, duration, spotify_id))
+                        self._run_named(p, sa, st, album, duration, spotify_id))
                      for p in enabled]
             for fut in asyncio.as_completed(tasks):
                 provider, raw, err = await fut
@@ -334,7 +447,7 @@ class LyricsService:
                 apply(provider.name, line, meta, word)
         else:
             for p in enabled:
-                raw, err = await self._run_provider(p, artist, title, album, duration, spotify_id)
+                raw, err = await self._run_provider(p, sa, st, album, duration, spotify_id)
                 line, meta, word = _normalize_result(raw)
                 self._log_provider_outcome(p.name, artist, title, line, word, err)
                 apply(p.name, line, meta, word)

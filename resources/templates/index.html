@@ -56,11 +56,21 @@
         </button>
       </div>
       <div id="provider-cycle" class="provider-cycle">
-        <button id="btn-prov-prev" class="prov-btn" title="Previous lyrics provider">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
-        </button>
-        <button id="btn-prov-next" class="prov-btn" title="Next lyrics provider">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
+        <span id="prov-pm" class="prov-pm">
+          <button id="btn-prov-prev" class="prov-btn" title="Previous lyrics provider">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+          </button>
+          <button id="btn-prov-next" class="prov-btn" title="Next lyrics provider">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
+          </button>
+        </span>
+        <button id="btn-bad-match" class="prov-btn bad-match" title="Wrong lyrics version — find another">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8.5 15.5a3.5 3.5 0 0 1 7 0" />
+            <path d="M9 9.5h.01" />
+            <path d="M15 9.5h.01" />
+          </svg>
         </button>
       </div>
     </div>

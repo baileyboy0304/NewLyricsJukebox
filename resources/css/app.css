@@ -152,6 +152,14 @@ body {
 .prov-btn:hover svg { stroke: var(--accent); }
 .provider-cycle.hidden { display: none; }
 
+/* +/- pair and the "bad match" (wrong-version) button share the cycle row. */
+.prov-pm { display: inline-flex; align-items: center; gap: 0.5rem; }
+.prov-pm.hidden { display: none; }
+.bad-match.hidden { display: none; }
+/* Slightly dimmer than +/- until a rescue is applied, then accent. */
+.bad-match svg { stroke: var(--muted); }
+.bad-match.active svg { stroke: var(--accent); }
+
 .ctrl-btn {
   display: inline-flex;
   align-items: center;

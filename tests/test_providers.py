@@ -12,7 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _TMP = tempfile.mkdtemp(prefix="nlj_test_")
 os.environ["NLJ_DATA_DIR"] = _TMP
 
-from lyrics import LyricsData, LyricsService  # noqa: E402
+from lyrics import (  # noqa: E402
+    LyricsData, LyricsService, alternate_queries,
+    _strip_version_noise, _strip_features,
+)
 
 
 def service():
@@ -135,6 +138,76 @@ def test_spotify_id_passed_only_to_providers_that_accept_it():
                           spotify_id="abc123"))
     assert seen["mxm"] == "abc123"        # aware provider got the id
     assert seen.get("lrc") is True        # plain provider ran, no crash
+
+
+def test_strip_version_noise():
+    assert _strip_version_noise("Song (Radio Edit)") == "Song"
+    assert _strip_version_noise("Song - Remastered 2011") == "Song"
+    assert _strip_version_noise("Song (Live at Wembley)") == "Song"
+    assert _strip_version_noise("It Must Have Been Love (From the Film \"Pretty Woman\")") \
+        == "It Must Have Been Love"
+    assert _strip_version_noise("Song (Live) (Remastered)") == "Song"
+    # A clean title is unchanged.
+    assert _strip_version_noise("Grease") == "Grease"
+
+
+def test_strip_features():
+    assert _strip_features("I Feel For You (feat. Melle Mel)") == "I Feel For You"
+    assert _strip_features("Chaka Khan, Melle Mel") == "Chaka Khan"
+    assert _strip_features("Artist & Friend") == "Artist"
+    assert _strip_features("Solo Artist") == "Solo Artist"
+
+
+def test_alternate_queries_ordered_and_deduped():
+    variants = alternate_queries("Roxette", "It Must Have Been Love (From the Film \"x\")")
+    assert variants[0] == ("Roxette", "It Must Have Been Love (From the Film \"x\")")
+    assert ("Roxette", "It Must Have Been Love") in variants
+    # No duplicates.
+    assert len(variants) == len(set(variants))
+
+
+def test_alternate_queries_clean_title_has_no_extra_variants():
+    # Nothing to strip -> only the original.
+    assert alternate_queries("Frankie Valli", "Grease") == [("Frankie Valli", "Grease")]
+
+
+def test_bad_match_rescue_reSearches_with_cleaned_title():
+    """A forced re-search uses the cleaned search terms, wipes the rejected
+    lyrics, and caches the new result under the ORIGINAL song key."""
+    import asyncio
+    svc = service()
+
+    class _TitleAware:
+        name, priority, enabled = "lrclib", 2, True
+        async def get_lyrics(self, artist, title, album=None, duration=None):
+            # Returns different lyrics depending on the (cleaned) title it's asked.
+            if "Radio Edit" in title:
+                return {"lyrics": [(0.0, "wrong version")]}
+            return {"lyrics": [(0.0, "correct version")]}
+
+    svc.providers = [_TitleAware()]
+    svc._by_name = {p.name: p for p in svc.providers}
+
+    artist, title = "ArtistR", f"SongR (Radio Edit)-{uuid.uuid4()}"
+    first = asyncio.run(svc.fetch(artist, title))
+    assert first.line_synced[0][1] == "wrong version"   # original noisy search
+
+    variants = alternate_queries(artist, title)
+    sa, st = variants[1]                                  # cleaned variant
+    rescued = asyncio.run(svc.fetch(artist, title, search_artist=sa,
+                                    search_title=st, force=True))
+    assert rescued.line_synced[0][1] == "correct version"
+    # Cache (original key) now holds the rescued lyrics, old ones wiped.
+    db = svc._read_db(artist, title)
+    assert db["saved_lyrics"]["lrclib"] == [[0.0, "correct version"]]
+
+
+def test_set_bad_match_index_persists():
+    svc = service()
+    artist, title = "A", f"Idx-{uuid.uuid4()}"
+    svc._write_provider(artist, title, "lrclib", [(0.0, "x")], {}, [])
+    svc.set_bad_match_index(artist, title, 2)
+    assert svc._read_db(artist, title)["bad_match_index"] == 2
 
 
 def test_lines_around():

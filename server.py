@@ -15,7 +15,7 @@ from quart import Quart, jsonify, render_template, request
 
 from classify import classify_source_mode
 from config import LYRICS, PLAYERS, RESOURCES_DIR, SERVER, VERSION
-from lyrics import LyricsData, LyricsService
+from lyrics import LyricsData, LyricsService, alternate_queries
 from ma_models import PlayerState
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ class PlayerRuntime:
     preferred_provider: Optional[str] = None  # persisted +/- pick for this song
     lyrics_attempts: set = field(default_factory=set)  # providers tried on demand
     lyrics_empty: set = field(default_factory=set)     # providers tried, no lyrics
+    bad_match_index: int = 0          # "bad match" rescue level (cleaned-search variant)
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
@@ -410,7 +411,8 @@ class Controller:
         }
 
     async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album,
-                               duration, spotify_id=None):
+                               duration, spotify_id=None, search_artist=None,
+                               search_title=None, force=False):
         def on_update(data):
             if runtime.lyrics_key == lyrics_key:   # ignore if track changed
                 runtime.lyrics = data
@@ -420,7 +422,9 @@ class Controller:
                 runtime.lyrics_db = self.lyrics_service.read_db(artist, title)
         try:
             await self.lyrics_service.fetch(artist, title, album, duration,
-                                            on_update=on_update, spotify_id=spotify_id)
+                                            on_update=on_update, spotify_id=spotify_id,
+                                            search_artist=search_artist,
+                                            search_title=search_title, force=force)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -477,13 +481,26 @@ class Controller:
             runtime.preferred_provider = None
             runtime.lyrics_attempts = set()
             runtime.lyrics_empty = set()
+            # Resume the 'bad match' rescue level the user previously settled on for
+            # this song (the cached lyrics already reflect that cleaned search).
+            persisted = self.lyrics_service.read_db(artist, title) or {}
+            runtime.bad_match_index = int(persisted.get("bad_match_index", 0) or 0)
             if runtime.lyrics_task and not runtime.lyrics_task.done():
                 runtime.lyrics_task.cancel()
+            # If this song was previously rescued, search with the same cleaned
+            # variant (a cache hit still short-circuits, so this only matters when
+            # nothing is cached yet).
+            sa = st = None
+            if runtime.bad_match_index > 0:
+                variants = alternate_queries(artist, title)
+                if runtime.bad_match_index < len(variants):
+                    sa, st = variants[runtime.bad_match_index]
             runtime.lyrics_task = asyncio.create_task(self._fetch_lyrics_bg(
                 runtime, lyrics_key, artist, title,
                 runtime.track.get("album"),
                 (runtime.track.get("duration_ms") or 0) // 1000 or None,
                 runtime.track.get("spotify_id"),
+                search_artist=sa, search_title=st,
             ))
 
         # The +/- buttons cycle through ALL enabled providers (not only those with
@@ -521,6 +538,48 @@ class Controller:
         lines = LyricsService.lines_around(data, position)
         self._log_line(runtime, name, position, lines.get("current", ""))
         return self._lyrics_payload(track_id, data, providers, lines)
+
+    async def bad_match(self, param: Optional[str]) -> dict:
+        """The user flagged the served lyrics as the wrong version. Re-search with
+        the next, more-aggressively-cleaned title variant (strip 'Radio Edit',
+        '(Remastered)', features, ...) and swap in the result. Each press advances
+        one variant; the chosen level is persisted so a recall reuses it. Returns
+        ``no_alternate`` when there are no cleaner variants left to try."""
+        key, _, _, name = self._resolve(param)
+        runtime = self.runtimes.get(key)
+        if runtime is None or not runtime.track.get("title"):
+            return {"ok": False, "error": "no track"}
+        artist = runtime.track.get("artist") or ""
+        title = runtime.track.get("title") or ""
+        lyrics_key = f"{artist}|{title}"
+        variants = alternate_queries(artist, title)
+        next_index = runtime.bad_match_index + 1
+        if next_index >= len(variants):
+            logger.info("bad-match: no other version to try for %s - %s (exhausted)",
+                        artist, title)
+            return {"ok": True, "no_alternate": True, "index": runtime.bad_match_index}
+
+        sa, st = variants[next_index]
+        runtime.bad_match_index = next_index
+        self.lyrics_service.set_bad_match_index(artist, title, next_index)
+        # Reset the served lyrics + provider state and re-search (forced) with the
+        # cleaned terms; polls show 'loading' until the rescue lands.
+        runtime.lyrics = None
+        runtime.lyrics_db = None
+        runtime.preferred_provider = None
+        runtime.lyrics_attempts = set()
+        runtime.lyrics_empty = set()
+        if runtime.lyrics_task and not runtime.lyrics_task.done():
+            runtime.lyrics_task.cancel()
+        runtime.lyrics_task = asyncio.create_task(self._fetch_lyrics_bg(
+            runtime, lyrics_key, artist, title,
+            runtime.track.get("album"),
+            (runtime.track.get("duration_ms") or 0) // 1000 or None,
+            runtime.track.get("spotify_id"),
+            search_artist=sa, search_title=st, force=True))
+        logger.info("bad-match: %s - %s -> variant %d/%d ('%s - %s')",
+                    artist, title, next_index, len(variants) - 1, sa, st)
+        return {"ok": True, "index": next_index, "search": f"{sa} - {st}"}
 
     # -- transport --------------------------------------------------------- #
 
@@ -573,6 +632,12 @@ def create_app(controller: Controller) -> Quart:
         return jsonify(await controller.lyrics(
             request.args.get("player"), request.args.get("provider")))
 
+    @app.route("/bad-match", methods=["POST"])
+    async def bad_match():
+        body = await request.get_json(silent=True) or {}
+        return jsonify(await controller.bad_match(
+            request.args.get("player") or body.get("player")))
+
     @app.route("/transport", methods=["POST"])
     async def transport():
         body = await request.get_json(silent=True) or {}
@@ -593,7 +658,7 @@ def create_app(controller: Controller) -> Quart:
 
     @app.after_request
     async def cache_headers(response):
-        if request.path in ("/", "/current-track", "/lyrics", "/players"):
+        if request.path in ("/", "/current-track", "/lyrics", "/players", "/bad-match"):
             response.headers["Cache-Control"] = "no-store"
         elif request.path.startswith("/static/"):
             # Revalidate static assets so a rebuilt add-on always serves fresh

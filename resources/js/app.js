@@ -22,6 +22,8 @@ let isScrubbing = false;
 let lyricProviders = [];         // providers that returned lyrics for this song
 let currentLyricProvider = null; // provider currently shown
 let chosenProvider = null;       // user pick via +/- (null = auto best)
+let hasLyrics = false;           // whether the current song has any lyrics
+let flashUntil = 0;              // suppress provider-text updates until this ts (ms)
 
 // ---------- console logging (compare timing with the add-on log) ----------
 // Logs use wall-clock HH:MM:SS.mmm to line up with the server's timestamps.
@@ -84,6 +86,8 @@ async function pollTrack() {
     chosenProvider = null;        // new song -> back to the auto-selected provider
     lyricProviders = [];
     currentLyricProvider = null;
+    hasLyrics = false;
+    $('btn-bad-match').classList.remove('active');  // reset wrong-version state
     flywheel.reset();
     nljLog('metadata', {
       title: data.title, artist: data.artist, source: data.source,
@@ -134,8 +138,12 @@ async function pollLyrics() {
   }
   lyricProviders = data.providers || [];
   currentLyricProvider = data.provider || null;
+  hasLyrics = !!data.has_lyrics;
   updateProviderCycle();
-  $('provider').textContent = data.provider ? `via ${data.provider}` : '';
+  // Don't clobber a brief "no other version" flash from the bad-match button.
+  if (Date.now() > flashUntil) {
+    $('provider').textContent = data.provider ? `via ${data.provider}` : '';
+  }
   // Log only when the lyric availability actually changes, not every poll.
   if (!!had !== !!lines.length || lines.length === 0) {
     nljLog('lyrics', {
@@ -255,11 +263,38 @@ function resetProgress() {
   }
 }
 
-// ---------- lyrics-provider cycle (+ / -) ----------
+// ---------- lyrics-provider cycle (+ / -) and bad-match ----------
 
-// Show the +/- buttons only when there's more than one provider to switch between.
+// The cycle row shows whenever the song has lyrics. The +/- pair is shown only
+// when there's more than one provider to switch between; the bad-match (wrong
+// version) button shows whenever there are lyrics to reject.
 function updateProviderCycle() {
-  $('provider-cycle').classList.toggle('hidden', lyricProviders.length < 2);
+  const show = hasLyrics || lyricProviders.length > 0;
+  $('provider-cycle').classList.toggle('hidden', !show);
+  $('prov-pm').classList.toggle('hidden', lyricProviders.length < 2);
+  $('btn-bad-match').classList.toggle('hidden', !hasLyrics);
+}
+
+// "Bad match": tell the server the served lyrics are the wrong version; it
+// re-searches with a cleaned title and swaps in an alternate (or reports none).
+async function badMatch() {
+  const res = await fetchJSON(withPlayer('bad-match'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  if (!res || !res.ok) return;
+  nljLog('bad-match', { index: res.index, search: res.search, none: !!res.no_alternate });
+  if (res.no_alternate) {
+    $('provider').textContent = 'No other version found';
+    flashUntil = Date.now() + 2500;
+    return;
+  }
+  $('btn-bad-match').classList.add('active');
+  chosenProvider = null;          // serve the re-search's auto-selected provider
+  lyricStatus = '…';
+  if (!window._fetchingLyrics) {   // refresh now, don't wait for the next poll
+    window._fetchingLyrics = true;
+    pollLyrics().finally(() => { window._fetchingLyrics = false; });
+  }
 }
 
 function cycleProvider(dir) {
@@ -386,6 +421,7 @@ function init() {
   wireTransport();
   $('btn-prov-prev').onclick = () => cycleProvider(-1);
   $('btn-prov-next').onclick = () => cycleProvider(1);
+  $('btn-bad-match').onclick = badMatch;
   $('btn-players').onclick = openPlayerModal;
   $('player-modal').onclick = (e) => {
     if (e.target.id === 'player-modal') e.target.classList.remove('open');
