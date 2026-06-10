@@ -24,6 +24,23 @@ _PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 RECOGNIZE_TIMEOUT = 10.0
 
 
+def _same_recording(a: RecognitionResult, b: RecognitionResult) -> bool:
+    """Looser track equality used only by the ACR refinement. Shazam and ACRCloud
+    routinely label the same recording slightly differently — e.g. Shazam's "It
+    Must Have Been Love" vs ACRCloud's "It Must Have Been Love (From the Film
+    'Pretty Woman')". Treat them as the same recording when the artist matches and
+    one title is a prefix of the other, so a valid position isn't thrown away over
+    a cosmetic suffix. (RecognitionResult.is_same_song stays strict for the main
+    song-change detection.)"""
+    na = (a.artist or "").strip().lower()
+    nb = (b.artist or "").strip().lower()
+    if not na or na != nb:
+        return False
+    ta = (a.title or "").strip().lower()
+    tb = (b.title or "").strip().lower()
+    return bool(ta) and (ta == tb or ta.startswith(tb) or tb.startswith(ta))
+
+
 class LockTracker:
     """Converges on a stable song position over several recognitions — the
     "3 attempts before locked" method, with the same state progression the
@@ -191,7 +208,13 @@ class PlayerRecognizer:
 
     async def _recognize_once(self, audio) -> Optional[RecognitionResult]:
         result = await self._shazam.recognize(audio)
-        if result is None and self._acrcloud.is_available():
+        # ACR priority reserves ACRCloud for the one-shot per-track refinement, so
+        # it must NOT also be spent here as a blind fallback on audio Shazam can't
+        # match (adverts / DJ talk / silence between songs). Doing so burns the
+        # daily quota on non-music AND leaves ACR in cooldown exactly when the next
+        # real song change wants its refinement. When ACR priority is off, the
+        # original Shazam -> ACRCloud fallback chain is unchanged.
+        if result is None and not self._acr_priority and self._acrcloud.is_available():
             result = await self._acrcloud.recognize(audio)
         return result
 
@@ -297,7 +320,7 @@ class PlayerRecognizer:
         if acr is None:
             logger.info("ACR priority: no ACRCloud match — keeping Shazam position")
             return
-        if not acr.is_same_song(shazam):
+        if not _same_recording(acr, shazam):
             logger.info("ACR priority: ACRCloud matched a different track "
                         "(%s - %s) — keeping Shazam position", acr.artist, acr.title)
             return

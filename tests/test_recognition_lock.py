@@ -170,6 +170,9 @@ class _StubACR:
     def unavailable_reason(self):
         return None if self._available else "not configured"
 
+    def is_available(self):
+        return self._available
+
     async def recognize(self, audio):
         self.calls += 1
         return self._result
@@ -243,6 +246,77 @@ def test_acr_priority_unavailable_keeps_shazam():
         shazam = make(10, 1000.0)
         await rec._handle_success(shazam, audio=object())
         assert rec._acrcloud.calls == 0            # not spent when unavailable
+        assert rec._acr_anchored is False
+        assert rec._current is shazam
+
+    asyncio.run(scenario())
+
+
+def test_acr_priority_disables_shazam_fallback_to_acrcloud():
+    """With ACR priority ON, a Shazam no-match must NOT fall back to ACRCloud
+    (that wasted quota on adverts/silence and left ACR cooling down at the next
+    song change). ACR is reserved for the one-shot refinement only."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer()                    # priority ON
+        rec._shazam = _StubACR(None)               # Shazam never matches
+        rec._acrcloud = _StubACR(make(5, 0))       # would match if asked
+        result = await rec._recognize_once(object())
+        assert result is None                      # no fallback to ACR
+        assert rec._acrcloud.calls == 0            # ACR not spent on a no-match
+
+    asyncio.run(scenario())
+
+
+def test_acr_fallback_still_used_when_priority_off():
+    """Sanity: with ACR priority OFF the original Shazam -> ACRCloud fallback
+    chain is unchanged."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        rec._shazam = _StubACR(None)
+        acr_hit = make(5, 0); acr_hit.provider = "acrcloud"
+        rec._acrcloud = _StubACR(acr_hit)
+        result = await rec._recognize_once(object())
+        assert result is acr_hit                   # fell back to ACRCloud
+        assert rec._acrcloud.calls == 1
+
+    asyncio.run(scenario())
+
+
+def test_acr_priority_accepts_title_variant():
+    """ACR priority adopts the position even when ACRCloud labels the same
+    recording with a cosmetic suffix (the Roxette '(From the Film ...)' case)."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(tolerance=5.0)
+        shazam = make(10, 1000.0, title="It Must Have Been Love", artist="Roxette")
+        acr = make(11, 1000.0,
+                   title="It Must Have Been Love (From the Film \"Pretty Woman\")",
+                   artist="Roxette")
+        acr.provider = "acrcloud"
+        rec._acrcloud = _StubACR(acr)
+        await rec._handle_success(shazam, audio=object())
+        assert rec._acr_anchored is True
+        assert rec._current is acr
+
+    asyncio.run(scenario())
+
+
+def test_acr_priority_rejects_genuinely_different_track():
+    """A truly different ACR match (different artist) is still rejected."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer()
+        shazam = make(10, 1000.0, title="Grease", artist="Frankie Valli")
+        acr = make(10, 1000.0, title="Greased Lightnin'", artist="John Travolta")
+        acr.provider = "acrcloud"
+        rec._acrcloud = _StubACR(acr)
+        await rec._handle_success(shazam, audio=object())
         assert rec._acr_anchored is False
         assert rec._current is shazam
 
