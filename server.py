@@ -365,6 +365,9 @@ class Controller:
             "duration_ms": int(result.duration * 1000) if result.duration else None,
             "is_playing": rec.is_playing,
             "seekable": False,
+            # ACRCloud (ACR priority) may supply a Spotify track id — used to pin
+            # lyrics to the exact recording (radio edits/remasters).
+            "spotify_id": getattr(result, "spotify_id", None),
         }
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         runtime.track = track
@@ -406,7 +409,8 @@ class Controller:
             "word_synced": data.word_synced,
         }
 
-    async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album, duration):
+    async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album,
+                               duration, spotify_id=None):
         def on_update(data):
             if runtime.lyrics_key == lyrics_key:   # ignore if track changed
                 runtime.lyrics = data
@@ -415,7 +419,8 @@ class Controller:
                 # not per poll, so the disk read is cheap.
                 runtime.lyrics_db = self.lyrics_service.read_db(artist, title)
         try:
-            await self.lyrics_service.fetch(artist, title, album, duration, on_update=on_update)
+            await self.lyrics_service.fetch(artist, title, album, duration,
+                                            on_update=on_update, spotify_id=spotify_id)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
@@ -435,6 +440,7 @@ class Controller:
                 runtime.track.get("album"),
                 (runtime.track.get("duration_ms") or 0) // 1000 or None,
                 on_update=on_update,
+                spotify_id=runtime.track.get("spotify_id"),
             )
         except asyncio.CancelledError:
             raise
@@ -477,6 +483,7 @@ class Controller:
                 runtime, lyrics_key, artist, title,
                 runtime.track.get("album"),
                 (runtime.track.get("duration_ms") or 0) // 1000 or None,
+                runtime.track.get("spotify_id"),
             ))
 
         # The +/- buttons cycle through ALL enabled providers (not only those with
