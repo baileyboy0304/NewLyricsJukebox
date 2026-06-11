@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.47
+
+- **Lyric-sync nudge direction reversed.** `+` now **advances** the lyrics (shows
+  them earlier) and `−` **delays** them (later) — the opposite of 1.0.46. (This
+  reversal was made for 1.0.46 but missed that merge.)
+- **Fixed the PWA manifest icon 404.** The manifest's icon `src` was
+  `static/images/icon-192.png`, but a manifest icon path is resolved relative to
+  the manifest's own URL (`static/manifest.json`), producing the doubled
+  `static/static/images/...` 404 seen in the console. Changed to `images/...` so
+  it resolves correctly (also works behind Home Assistant ingress).
+
 ## 1.0.46
 
 - **Manual lyric-sync nudge with per-song memory.** A new control sits on the left

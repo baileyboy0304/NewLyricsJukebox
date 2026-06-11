@@ -25,8 +25,8 @@ let chosenProvider = null;       // user pick via +/- (null = auto best)
 let hasLyrics = false;           // whether the current song has any lyrics
 let flashUntil = 0;              // suppress provider-text updates until this ts (ms)
 
-// Manual lyric-timing offset (seconds). +offset DELAYS lyrics (shows later),
-// -offset ADVANCES them (earlier). 0.25s steps. "memory" remembers it per song.
+// Manual lyric-timing offset (seconds). +offset ADVANCES lyrics (shows earlier),
+// -offset DELAYS them (later). 0.25s steps. "memory" remembers it per song.
 const SYNC_STEP = 0.25;
 let lyricOffset = 0;
 let memoryOn = (localStorage.getItem('nlj_memory') !== '0');  // default on
@@ -214,8 +214,9 @@ function setLines({ previous, current, next }) {
 function renderFrame(ts) {
   const position = flywheel.tick(ts);
   // Lyric line lookup uses the manually-nudged position; the progress bar/time
-  // below stay on the true audio position.
-  const lyricPos = position - lyricOffset;
+  // below stay on the true audio position. +offset ADVANCES the lyrics (looks
+  // ahead in the song), -offset delays them.
+  const lyricPos = position + lyricOffset;
   if (currentLines.length) {
     const idx = activeLineIndex(currentLines, lyricPos);
     setLines({
@@ -488,8 +489,8 @@ function init() {
   $('btn-prov-prev').onclick = () => cycleProvider(-1);
   $('btn-prov-next').onclick = () => cycleProvider(1);
   $('btn-bad-match').onclick = badMatch;
-  $('btn-sync-minus').onclick = () => adjustOffset(-1);  // lyrics earlier
-  $('btn-sync-plus').onclick = () => adjustOffset(1);    // lyrics later
+  $('btn-sync-minus').onclick = () => adjustOffset(-1);  // lyrics later (delay)
+  $('btn-sync-plus').onclick = () => adjustOffset(1);    // lyrics earlier (advance)
   $('sync-memory').checked = memoryOn;
   $('sync-memory').onchange = onMemoryToggle;
   updateSyncDisplay();
