@@ -195,6 +195,12 @@ body {
 .bad-match svg { stroke: var(--muted); }
 .bad-match.active svg { stroke: var(--accent); }
 
+/* Thumbs-down: "no good lyrics — hide for this song". Highlighted (accent) when
+   suppression is active for the current song. */
+.suppress.hidden { display: none; }
+.suppress svg { stroke: var(--muted); }
+.suppress.active svg { stroke: var(--accent); }
+
 .ctrl-btn {
   display: inline-flex;
   align-items: center;
