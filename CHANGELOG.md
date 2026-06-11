@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.48
+
+- **Musixmatch no longer discards word-synced-only lyrics.** It previously
+  returned lyrics ONLY when line-synced *subtitles* were present; if a track had
+  RichSync (word-synced) lyrics but no subtitles — common on Spotify-id matches,
+  e.g. Madonna – "Cherish" — it logged "No synced lyrics available" and returned
+  nothing, so the provider appeared to have no option. Line-synced lyrics are now
+  derived from the per-line RichSync timings in that case, so Musixmatch surfaces
+  (and the +/- cycle can pick) its lyrics.
+
 ## 1.0.47
 
 - **Lyric-sync nudge direction reversed.** `+` now **advances** the lyrics (shows

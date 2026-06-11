@@ -407,6 +407,16 @@ class MusixmatchProvider(LyricsProvider):
                 if word_synced_lyrics:
                     logger.info(f"Musixmatch - Got {len(word_synced_lyrics)} word-synced lines")
             
+            # No line-synced subtitles but word-synced (RichSync) exists: derive
+            # line-synced lyrics from the per-line RichSync timings. Musixmatch
+            # often has RichSync without separate subtitles (seen on Spotify-id
+            # matches), and discarding it left the 3-line view empty.
+            if not line_synced_lyrics and word_synced_lyrics:
+                line_synced_lyrics = self._line_synced_from_richsync(word_synced_lyrics)
+                if line_synced_lyrics:
+                    logger.info("Musixmatch - Derived %d line-synced lines from RichSync",
+                                len(line_synced_lyrics))
+
             # Return results if we have any lyrics
             if line_synced_lyrics:
                 result = {
@@ -437,6 +447,13 @@ class MusixmatchProvider(LyricsProvider):
             logger.error(f"Musixmatch - Error: {e}")
             return None
     
+    @staticmethod
+    def _line_synced_from_richsync(word_synced: List[Dict[str, Any]]) -> List[Tuple[float, str]]:
+        """Build line-synced lyrics (start, text) from RichSync word-synced lines,
+        for tracks that have RichSync but no separate line subtitles."""
+        return [(w["start"], w["text"]) for w in (word_synced or [])
+                if w.get("text") and "start" in w]
+
     def _fetch_richsync(self, track_id: int, commontrack_id: int, token: str) -> Optional[List[Dict[str, Any]]]:
         """
         Fetch RichSync (word-synced) lyrics for a track.
