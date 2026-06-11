@@ -243,6 +243,7 @@ class PlayerStream:
             "ssrc": format(self.ssrc, "08x") if self.ssrc is not None else None,
             "packet_count": self.packet_count,
             "active": self.active,
+            "last_seen": self.last_seen,
         }
 
 

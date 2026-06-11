@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.45
+
+- **Player picker no longer shows the same device several times.** A respeaker
+  reconnects with a fresh RTP SSRC, leaving stale sibling streams behind, so the
+  "Select player" list showed `respeaker_lyrics` once per SSRC. Streams that share
+  an identity (Music Assistant player id, or name + source IP) are now collapsed to
+  a single entry — the active one, else the most-recently-seen. Genuinely
+  different devices stay separate.
+- **Play/pause icon now reflects the real state.** When playback stopped or the
+  track cleared (paused / between songs), `current-track` returns no title and the
+  poll returned early *before* updating the transport icon, so it was stuck showing
+  the pause symbol forever. The icon is now reset to "play" in that path.
+
 ## 1.0.44
 
 - **🧪 Smarter same-recording match (ACR priority).** Shazam and ACRCloud often

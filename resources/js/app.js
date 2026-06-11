@@ -74,6 +74,9 @@ async function pollTrack() {
   if (data && data.player) updateSpeakerName(data.player);
   if (!data || !data.title) {
     flywheel.isPlaying = false;
+    // No playing track (paused / stopped / cleared between songs) — reset the
+    // transport icon to "play", otherwise it stays stuck on the pause symbol.
+    updatePlayPause(!!(data && data.is_playing));
     return false;
   }
   // Track changed -> clear stale lyrics IMMEDIATELY (metadata drives this) and
