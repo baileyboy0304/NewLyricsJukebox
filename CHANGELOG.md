@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.50
+
+- **Fixed the lyric "shudder" on radio — and the ACR-credit burn behind it.**
+  Shazam frequently returns two titles for the *same* audio on alternating cycles
+  (e.g. `Babylon` ↔ `Babylon (UK Radio Mix)`, `Angels` ↔ `Angels (Remastered
+  2004)`, `Live It Up (Remastered)` ↔ `(Acoustic)`). The strict song-change check
+  treated every flip as a brand-new song, so it **reset the position lock every
+  few seconds** — the lyrics jumped back and forth — and **spent an ACR credit on
+  each flip** (a single thrashing song could burn ~120/hour, which is what
+  exhausted the 100/day quota). Song-change detection now ignores version-suffix
+  churn (same artist + same title once mix/edit/remaster/live/... noise is
+  stripped), so the position stays locked and ACR fires **once per real track**.
+- **ACR quota now resets on the UTC day.** ACRCloud's daily counter rolls over at
+  00:00 UTC (its usage dashboard is bucketed by UTC date); the local-date reset
+  could resume ACR hours early/late. ACR is left alone once the daily limit is hit
+  and resumes exactly at the UTC rollover.
+
 ## 1.0.49
 
 - **Thumbs-down: hide lyrics for a song with no good match.** A new thumbs-down
