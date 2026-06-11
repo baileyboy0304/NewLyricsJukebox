@@ -25,6 +25,13 @@ let chosenProvider = null;       // user pick via +/- (null = auto best)
 let hasLyrics = false;           // whether the current song has any lyrics
 let flashUntil = 0;              // suppress provider-text updates until this ts (ms)
 
+// Manual lyric-timing offset (seconds). +offset DELAYS lyrics (shows later),
+// -offset ADVANCES them (earlier). 0.25s steps. "memory" remembers it per song.
+const SYNC_STEP = 0.25;
+let lyricOffset = 0;
+let memoryOn = (localStorage.getItem('nlj_memory') !== '0');  // default on
+let offsetTrackId = null;        // track we've applied the remembered offset for
+
 // ---------- console logging (compare timing with the add-on log) ----------
 // Logs use wall-clock HH:MM:SS.mmm to line up with the server's timestamps.
 function nljLog(kind, detail) {
@@ -91,6 +98,9 @@ async function pollTrack() {
     currentLyricProvider = null;
     hasLyrics = false;
     $('btn-bad-match').classList.remove('active');  // reset wrong-version state
+    lyricOffset = 0;                 // new song -> default timing until remembered value loads
+    offsetTrackId = null;
+    updateSyncDisplay();
     flywheel.reset();
     nljLog('metadata', {
       title: data.title, artist: data.artist, source: data.source,
@@ -142,6 +152,7 @@ async function pollLyrics() {
   lyricProviders = data.providers || [];
   currentLyricProvider = data.provider || null;
   hasLyrics = !!data.has_lyrics;
+  applyRememberedOffset(data.timing_offset, data.track_id);
   updateProviderCycle();
   // Don't clobber a brief "no other version" flash from the bad-match button.
   if (Date.now() > flashUntil) {
@@ -202,8 +213,11 @@ function setLines({ previous, current, next }) {
 
 function renderFrame(ts) {
   const position = flywheel.tick(ts);
+  // Lyric line lookup uses the manually-nudged position; the progress bar/time
+  // below stay on the true audio position.
+  const lyricPos = position - lyricOffset;
   if (currentLines.length) {
-    const idx = activeLineIndex(currentLines, position);
+    const idx = activeLineIndex(currentLines, lyricPos);
     setLines({
       previous: idx - 1 >= 0 ? currentLines[idx - 1].text : '',
       current: idx >= 0 ? currentLines[idx].text : '',
@@ -298,6 +312,55 @@ async function badMatch() {
     window._fetchingLyrics = true;
     pollLyrics().finally(() => { window._fetchingLyrics = false; });
   }
+}
+
+// ---------- lyric-timing offset (sync nudge) + memory ----------
+
+function fmtOffset(v) {
+  const sign = v > 0 ? '+' : v < 0 ? '-' : '';
+  return `${sign}${Math.abs(v).toFixed(2)}s`;
+}
+
+function updateSyncDisplay() {
+  $('sync-value').textContent = fmtOffset(lyricOffset);
+}
+
+// POST the current offset for persistence. remember=true stores it on the song;
+// remember=false forgets it (server resets the stored value to default).
+function persistOffset(remember) {
+  fetchJSON(withPlayer('lyric-offset'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ offset: lyricOffset, remember }),
+  });
+}
+
+function adjustOffset(dir) {
+  lyricOffset = Math.max(-30, Math.min(30,
+    Math.round((lyricOffset + dir * SYNC_STEP) * 100) / 100));
+  updateSyncDisplay();
+  offsetTrackId = currentTrackId;     // user override wins over any remembered value
+  if (memoryOn) persistOffset(true);  // changing the timing stores it (when remembering)
+  nljLog('lyric-offset', { offset: lyricOffset, memory: memoryOn });
+}
+
+function onMemoryToggle() {
+  memoryOn = $('sync-memory').checked;
+  localStorage.setItem('nlj_memory', memoryOn ? '1' : '0');
+  if (memoryOn) {
+    persistOffset(true);              // start remembering the current offset
+  } else {
+    lyricOffset = 0;                  // unticked -> default timing, forget the cached value
+    updateSyncDisplay();
+    persistOffset(false);
+  }
+}
+
+// Apply a song's remembered offset once per track (from the /lyrics payload).
+function applyRememberedOffset(serverOffset, trackId) {
+  if (!memoryOn || trackId == null || trackId === offsetTrackId) return;
+  lyricOffset = Number(serverOffset) || 0;
+  offsetTrackId = trackId;
+  updateSyncDisplay();
 }
 
 function cycleProvider(dir) {
@@ -425,6 +488,11 @@ function init() {
   $('btn-prov-prev').onclick = () => cycleProvider(-1);
   $('btn-prov-next').onclick = () => cycleProvider(1);
   $('btn-bad-match').onclick = badMatch;
+  $('btn-sync-minus').onclick = () => adjustOffset(-1);  // lyrics earlier
+  $('btn-sync-plus').onclick = () => adjustOffset(1);    // lyrics later
+  $('sync-memory').checked = memoryOn;
+  $('sync-memory').onchange = onMemoryToggle;
+  updateSyncDisplay();
   $('btn-players').onclick = openPlayerModal;
   $('player-modal').onclick = (e) => {
     if (e.target.id === 'player-modal') e.target.classList.remove('open');

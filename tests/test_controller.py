@@ -374,6 +374,106 @@ def test_resolve_stream_key_migrates_off_dead_selected_stream():
     assert c._resolve_stream_key("73d34824", "a0505ec6") == "ae0d58dd"
 
 
+def test_transport_migrates_stale_stream_key_to_live_ma_player():
+    """A selected RTP stream key that has gone stale (respeaker reconnected with a
+    new SSRC) must NOT be sent to MA as the player id — transport migrates to the
+    live stream's MA player instead of erroring 'Player <ssrc> is not available'."""
+    called = {}
+
+    class _MA:
+        connected = True
+        preferred_player_id = None
+
+        def list_players(self):
+            return [{"player_id": "real-ma-id", "name": "respeaker"}]
+
+        def find_playing_player_id(self):
+            return None
+
+        async def play_pause(self, pid):
+            called["pid"] = pid
+            return True
+
+        async def play(self, pid): return True
+        async def pause(self, pid): return True
+        async def next(self, pid): return True
+        async def previous(self, pid): return True
+        async def seek(self, pid, pos): return True
+
+    class _Live:
+        key = "newssrc"
+        ma_player_id = "real-ma-id"
+        name = "respeaker"
+        active = True
+
+    class _Cap:
+        def get_stream(self, k):
+            return None                      # the stale SSRC is gone
+
+        def first_active_stream(self):
+            return _Live()
+
+    async def scenario():
+        c = Controller(ma=_MA(), capture=_Cap())
+        res = await c.transport("78e8eb7a", "play_pause")   # stale selected SSRC
+        assert res["ok"] is True
+        assert called["pid"] == "real-ma-id"  # migrated, not the raw SSRC
+
+    asyncio.run(scenario())
+
+
+def test_transport_passes_through_valid_ma_id():
+    """A valid MA player id is used as-is (no needless migration)."""
+    called = {}
+
+    class _MA:
+        connected = True
+        preferred_player_id = None
+
+        def list_players(self):
+            return [{"player_id": "p1", "name": "Kitchen"}]
+
+        def find_playing_player_id(self):
+            return None
+
+        async def pause(self, pid):
+            called["pid"] = pid
+            return True
+
+        async def play(self, pid): return True
+        async def play_pause(self, pid): return True
+        async def next(self, pid): return True
+        async def previous(self, pid): return True
+        async def seek(self, pid, pos): return True
+
+    async def scenario():
+        c = Controller(ma=_MA(), capture=None)
+        res = await c.transport("p1", "pause")
+        assert res["ok"] is True and called["pid"] == "p1"
+
+    asyncio.run(scenario())
+
+
+def test_set_lyric_offset_remembers_and_forgets():
+    """memory ON stores the offset on the song; memory OFF resets to 0 and clears
+    the stored value."""
+    c = Controller(ma=None, capture=None)
+    c.runtimes["auto"] = PlayerRuntime(
+        key="auto", track={"title": "Song", "artist": "Artist",
+                           "track_id": "Artist|Song"})
+    stored = {}
+    c.lyrics_service.set_timing_offset = lambda a, t, o: stored.__setitem__("v", o)
+    c.lyrics_service.clear_timing_offset = lambda a, t: stored.pop("v", None)
+
+    r1 = c.set_lyric_offset(None, 0.5, True)        # memory on -> remember
+    assert r1["timing_offset"] == 0.5 and stored["v"] == 0.5
+    assert c.runtimes["auto"].timing_offset == 0.5
+
+    r2 = c.set_lyric_offset(None, 0.5, False)       # memory off -> forget + reset
+    assert r2["timing_offset"] == 0.0 and "v" not in stored
+    assert c.runtimes["auto"].timing_offset == 0.0
+
+
 def test_list_players_dedupes_reconnected_streams():
     """A respeaker that reconnects gets a fresh SSRC, leaving stale sibling streams
     with the same name/MA id. The picker must show ONE entry per device (the active

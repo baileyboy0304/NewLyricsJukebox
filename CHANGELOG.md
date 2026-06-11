@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.46
+
+- **Manual lyric-sync nudge with per-song memory.** A new control sits on the left
+  of the transport row (mirroring the provider +/- on the right): a −/value/+
+  adjuster that shifts the lyrics relative to the audio in **0.25 s** steps, shown
+  as `+0.25s` / `-0.50s` / `1.00s`. `+` delays the lyrics (shows them later), `−`
+  advances them (earlier). A **memory** checkbox next to it:
+  - When ticked, changing the timing stores the offset on that song.
+  - When the song plays again, the remembered offset is reapplied automatically.
+  - Unticking memory reverts the song to default timing and deletes the stored
+    value.
+  The offset is applied to lyric rendering in the browser; persistence uses the
+  per-song JSON DB via a new `POST /lyric-offset` endpoint. The memory tick state
+  is remembered in the browser (localStorage).
+
+> Note: this release also carries the transport stale-stream fix that narrowly
+> missed the 1.0.45 (#43) merge — play/pause no longer errors with "Player <ssrc>
+> is not available" after the respeaker reconnects with a new SSRC.
+
 ## 1.0.45
 
 - **Player picker no longer shows the same device several times.** A respeaker
@@ -12,6 +31,12 @@
   track cleared (paused / between songs), `current-track` returns no title and the
   poll returned early *before* updating the transport icon, so it was stuck showing
   the pause symbol forever. The icon is now reset to "play" in that path.
+- **Transport commands no longer fail on a stale stream.** When the respeaker
+  reconnects with a new SSRC, the selected stream key goes stale; `transport` was
+  then passing that raw SSRC to Music Assistant as the player id ("Player <ssrc>
+  is not available"). It now validates the id against MA's player list and, if
+  stale, migrates to the live stream's MA player (or whatever MA reports as
+  playing) — the same migration `current-track` already did.
 
 ## 1.0.44
 
