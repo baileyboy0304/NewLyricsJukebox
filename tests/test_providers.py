@@ -250,6 +250,21 @@ def test_isrc_passed_only_to_providers_that_accept_it():
     assert seen.get("lrc") is True
 
 
+def test_musixmatch_derives_line_sync_from_richsync():
+    """When Musixmatch has RichSync (word-synced) but no line subtitles, line-sync
+    is derived from the per-line RichSync timings (the Madonna 'Cherish' case where
+    Musixmatch previously returned nothing)."""
+    from providers.musixmatch import MusixmatchProvider
+    word_synced = [
+        {"start": 15.68, "end": 18.5, "text": "We were both young", "words": []},
+        {"start": 18.6, "end": 21.0, "text": "when I first saw you", "words": []},
+        {"start": 21.1, "end": 23.0, "text": "", "words": []},   # blank -> skipped
+    ]
+    out = MusixmatchProvider._line_synced_from_richsync(word_synced)
+    assert out == [(15.68, "We were both young"), (18.6, "when I first saw you")]
+    assert MusixmatchProvider._line_synced_from_richsync(None) == []
+
+
 def test_lines_around():
     data = LyricsData(artist="A", title="B", line_synced=[
         (0.0, "one"), (5.0, "two"), (10.0, "three"),
