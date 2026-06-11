@@ -5,8 +5,8 @@
 - **Manual lyric-sync nudge with per-song memory.** A new control sits on the left
   of the transport row (mirroring the provider +/- on the right): a −/value/+
   adjuster that shifts the lyrics relative to the audio in **0.25 s** steps, shown
-  as `+0.25s` / `-0.50s` / `1.00s`. `+` delays the lyrics (shows them later), `−`
-  advances them (earlier). A **memory** checkbox next to it:
+  as `+0.25s` / `-0.50s` / `1.00s`. `+` advances the lyrics (shows them earlier),
+  `−` delays them (later). A **memory** checkbox next to it:
   - When ticked, changing the timing stores the offset on that song.
   - When the song plays again, the remembered offset is reapplied automatically.
   - Unticking memory reverts the song to default timing and deletes the stored
