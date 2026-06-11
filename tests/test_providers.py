@@ -222,6 +222,17 @@ def test_timing_offset_persist_and_clear():
     assert "timing_offset" not in svc._read_db(artist, title)
 
 
+def test_suppress_lyrics_persist_and_clear():
+    """Thumbs-down: the 'no good lyrics' flag is stored and removed."""
+    svc = service()
+    artist, title = "A", f"Suppress-{uuid.uuid4()}"
+    svc._write_provider(artist, title, "lrclib", [(0.0, "x")], {}, [])
+    svc.set_suppress_lyrics(artist, title, True)
+    assert svc._read_db(artist, title)["suppress_lyrics"] is True
+    svc.set_suppress_lyrics(artist, title, False)
+    assert "suppress_lyrics" not in svc._read_db(artist, title)
+
+
 def test_isrc_passed_only_to_providers_that_accept_it():
     """Shazam's ISRC must reach providers that accept ``isrc`` (Musixmatch) and be
     ignored by those that don't — alongside any Spotify id, without TypeErrors."""

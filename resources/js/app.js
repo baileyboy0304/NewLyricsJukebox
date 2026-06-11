@@ -32,6 +32,12 @@ let lyricOffset = 0;
 let memoryOn = (localStorage.getItem('nlj_memory') !== '0');  // default on
 let offsetTrackId = null;        // track we've applied the remembered offset for
 
+// Thumbs-down: hide lyrics for a song judged to have no good lyrics. Persisted
+// per song; the icon is highlighted on replay so the user can toggle it off to
+// re-check for a better option.
+let suppressLyrics = false;
+let suppressTrackId = null;      // track we've applied the stored suppress flag for
+
 // ---------- console logging (compare timing with the add-on log) ----------
 // Logs use wall-clock HH:MM:SS.mmm to line up with the server's timestamps.
 function nljLog(kind, detail) {
@@ -101,6 +107,9 @@ async function pollTrack() {
     lyricOffset = 0;                 // new song -> default timing until remembered value loads
     offsetTrackId = null;
     updateSyncDisplay();
+    suppressLyrics = false;          // new song -> show lyrics until stored flag loads
+    suppressTrackId = null;
+    $('btn-suppress').classList.remove('active');
     flywheel.reset();
     nljLog('metadata', {
       title: data.title, artist: data.artist, source: data.source,
@@ -153,6 +162,7 @@ async function pollLyrics() {
   currentLyricProvider = data.provider || null;
   hasLyrics = !!data.has_lyrics;
   applyRememberedOffset(data.timing_offset, data.track_id);
+  applySuppress(data.suppress_lyrics, data.track_id);
   updateProviderCycle();
   // Don't clobber a brief "no other version" flash from the bad-match button.
   if (Date.now() > flashUntil) {
@@ -217,7 +227,10 @@ function renderFrame(ts) {
   // below stay on the true audio position. +offset ADVANCES the lyrics (looks
   // ahead in the song), -offset delays them.
   const lyricPos = position + lyricOffset;
-  if (currentLines.length) {
+  if (suppressLyrics) {
+    // Lyrics hidden for this song (thumbs-down). Keep the progress bar updating.
+    setLines({ previous: '', current: '', next: '' });
+  } else if (currentLines.length) {
     const idx = activeLineIndex(currentLines, lyricPos);
     setLines({
       previous: idx - 1 >= 0 ? currentLines[idx - 1].text : '',
@@ -287,10 +300,12 @@ function resetProgress() {
 // when there's more than one provider to switch between; the bad-match (wrong
 // version) button shows whenever there are lyrics to reject.
 function updateProviderCycle() {
-  const show = hasLyrics || lyricProviders.length > 0;
+  const show = hasLyrics || lyricProviders.length > 0 || suppressLyrics;
   $('provider-cycle').classList.toggle('hidden', !show);
   $('prov-pm').classList.toggle('hidden', lyricProviders.length < 2);
   $('btn-bad-match').classList.toggle('hidden', !hasLyrics);
+  // Keep the thumbs-down available while suppressed so the user can toggle it off.
+  $('btn-suppress').classList.toggle('hidden', !(hasLyrics || suppressLyrics));
 }
 
 // "Bad match": tell the server the served lyrics are the wrong version; it
@@ -362,6 +377,26 @@ function applyRememberedOffset(serverOffset, trackId) {
   lyricOffset = Number(serverOffset) || 0;
   offsetTrackId = trackId;
   updateSyncDisplay();
+}
+
+// Thumbs-down: toggle hiding lyrics for the current song (persisted per song).
+function toggleSuppress() {
+  suppressLyrics = !suppressLyrics;
+  suppressTrackId = currentTrackId;
+  $('btn-suppress').classList.toggle('active', suppressLyrics);
+  fetchJSON(withPlayer('suppress-lyrics'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ suppress: suppressLyrics }),
+  });
+  nljLog('suppress', { suppress: suppressLyrics });
+}
+
+// Apply a song's stored suppress flag once per track (from the /lyrics payload).
+function applySuppress(serverSuppress, trackId) {
+  if (trackId == null || trackId === suppressTrackId) return;
+  suppressLyrics = !!serverSuppress;
+  suppressTrackId = trackId;
+  $('btn-suppress').classList.toggle('active', suppressLyrics);
 }
 
 function cycleProvider(dir) {
@@ -489,6 +524,7 @@ function init() {
   $('btn-prov-prev').onclick = () => cycleProvider(-1);
   $('btn-prov-next').onclick = () => cycleProvider(1);
   $('btn-bad-match').onclick = badMatch;
+  $('btn-suppress').onclick = toggleSuppress;
   $('btn-sync-minus').onclick = () => adjustOffset(-1);  // lyrics later (delay)
   $('btn-sync-plus').onclick = () => adjustOffset(1);    // lyrics earlier (advance)
   $('sync-memory').checked = memoryOn;

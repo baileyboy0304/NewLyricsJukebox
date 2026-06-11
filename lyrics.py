@@ -169,6 +169,13 @@ class LyricsService:
         self._patch_db(artist, title, timing_offset=None)
         logger.info("lyrics timing offset cleared for %s - %s", artist, title)
 
+    def set_suppress_lyrics(self, artist: str, title: str, suppress: bool) -> None:
+        """Persist (or clear) the 'no good lyrics' thumbs-down flag for a song, so
+        lyrics stay hidden on replay until the user toggles it back on."""
+        self._patch_db(artist, title, suppress_lyrics=True if suppress else None)
+        logger.info("lyrics %s for %s - %s",
+                    "suppressed" if suppress else "un-suppressed", artist, title)
+
     # -- provider cycling (manual +/- selection) -------------------------- #
 
     def enabled_provider_names(self) -> List[str]:

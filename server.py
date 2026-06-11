@@ -36,6 +36,7 @@ class PlayerRuntime:
     lyrics_empty: set = field(default_factory=set)     # providers tried, no lyrics
     bad_match_index: int = 0          # "bad match" rescue level (cleaned-search variant)
     timing_offset: float = 0.0        # manual lyric-timing offset (s), remembered per song
+    suppress_lyrics: bool = False     # user flagged "no good lyrics" -> hide for this song
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
@@ -405,7 +406,8 @@ class Controller:
     # -- lyrics ------------------------------------------------------------ #
 
     def _empty_lyrics(self, track_id=None, pending=False, provider=None,
-                      providers=None, no_lyrics=False, timing_offset=0.0):
+                      providers=None, no_lyrics=False, timing_offset=0.0,
+                      suppress_lyrics=False):
         return {
             "track_id": track_id,
             "has_lyrics": False,
@@ -420,9 +422,11 @@ class Controller:
             "line_synced": [],
             "word_synced": [],
             "timing_offset": timing_offset,
+            "suppress_lyrics": suppress_lyrics,
         }
 
-    def _lyrics_payload(self, track_id, data, providers, lines, timing_offset=0.0):
+    def _lyrics_payload(self, track_id, data, providers, lines, timing_offset=0.0,
+                        suppress_lyrics=False):
         return {
             "track_id": track_id,
             "has_lyrics": data.has_lyrics,
@@ -437,6 +441,7 @@ class Controller:
             "line_synced": [{"start": s, "text": t} for s, t in data.line_synced],
             "word_synced": data.word_synced,
             "timing_offset": timing_offset,
+            "suppress_lyrics": suppress_lyrics,
         }
 
     async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album,
@@ -517,6 +522,7 @@ class Controller:
             persisted = self.lyrics_service.read_db(artist, title) or {}
             runtime.bad_match_index = int(persisted.get("bad_match_index", 0) or 0)
             runtime.timing_offset = float(persisted.get("timing_offset", 0.0) or 0.0)
+            runtime.suppress_lyrics = bool(persisted.get("suppress_lyrics", False))
             if runtime.lyrics_task and not runtime.lyrics_task.done():
                 runtime.lyrics_task.cancel()
             # If this song was previously rescued, search with the same cleaned
@@ -553,29 +559,32 @@ class Controller:
                 lines = LyricsService.lines_around(cached, position)
                 self._log_line(runtime, name, position, lines.get("current", ""))
                 return self._lyrics_payload(track_id, cached, providers, lines,
-                                            runtime.timing_offset)
+                                            runtime.timing_offset, runtime.suppress_lyrics)
             if provider in runtime.lyrics_empty:        # tried, has none -> blank
                 return self._empty_lyrics(track_id, provider=provider,
                                           providers=providers, no_lyrics=True,
-                                          timing_offset=runtime.timing_offset)
+                                          timing_offset=runtime.timing_offset,
+                                          suppress_lyrics=runtime.suppress_lyrics)
             if provider not in runtime.lyrics_attempts:  # not tried yet -> fetch it
                 runtime.lyrics_attempts.add(provider)
                 asyncio.create_task(self._fetch_provider_bg(
                     runtime, lyrics_key, artist, title, provider))
             return self._empty_lyrics(track_id, provider=provider,
                                       providers=providers, pending=True,
-                                      timing_offset=runtime.timing_offset)
+                                      timing_offset=runtime.timing_offset,
+                                      suppress_lyrics=runtime.suppress_lyrics)
 
         data = runtime.lyrics
         if data is None:
             return self._empty_lyrics(track_id, providers=providers, pending=True,
-                                      timing_offset=runtime.timing_offset)
+                                      timing_offset=runtime.timing_offset,
+                                      suppress_lyrics=runtime.suppress_lyrics)
 
         position = runtime.track.get("position", 0.0)
         lines = LyricsService.lines_around(data, position)
         self._log_line(runtime, name, position, lines.get("current", ""))
         return self._lyrics_payload(track_id, data, providers, lines,
-                                    runtime.timing_offset)
+                                    runtime.timing_offset, runtime.suppress_lyrics)
 
     async def bad_match(self, param: Optional[str]) -> dict:
         """The user flagged the served lyrics as the wrong version. Re-search with
@@ -639,6 +648,20 @@ class Controller:
             runtime.timing_offset = 0.0
             self.lyrics_service.clear_timing_offset(artist, title)
         return {"ok": True, "timing_offset": runtime.timing_offset}
+
+    def set_suppress_lyrics(self, param: Optional[str], suppress: bool) -> dict:
+        """Thumbs-down: the user judged this song has no good lyrics. Persist the
+        flag so lyrics are hidden when the song plays again (until the user toggles
+        it off to check whether a better option has since become available)."""
+        key, _, _, _ = self._resolve(param)
+        runtime = self.runtimes.get(key)
+        if runtime is None or not runtime.track.get("title"):
+            return {"ok": False, "error": "no track"}
+        artist = runtime.track.get("artist") or ""
+        title = runtime.track.get("title") or ""
+        runtime.suppress_lyrics = bool(suppress)
+        self.lyrics_service.set_suppress_lyrics(artist, title, runtime.suppress_lyrics)
+        return {"ok": True, "suppress_lyrics": runtime.suppress_lyrics}
 
     # -- transport --------------------------------------------------------- #
 
@@ -730,6 +753,13 @@ def create_app(controller: Controller) -> Quart:
             float(body.get("offset") or 0.0),
             bool(body.get("remember", True))))
 
+    @app.route("/suppress-lyrics", methods=["POST"])
+    async def suppress_lyrics():
+        body = await request.get_json(silent=True) or {}
+        return jsonify(controller.set_suppress_lyrics(
+            request.args.get("player") or body.get("player"),
+            bool(body.get("suppress", True))))
+
     @app.route("/transport", methods=["POST"])
     async def transport():
         body = await request.get_json(silent=True) or {}
@@ -751,7 +781,7 @@ def create_app(controller: Controller) -> Quart:
     @app.after_request
     async def cache_headers(response):
         if request.path in ("/", "/current-track", "/lyrics", "/players",
-                            "/bad-match", "/lyric-offset"):
+                            "/bad-match", "/lyric-offset", "/suppress-lyrics"):
             response.headers["Cache-Control"] = "no-store"
         elif request.path.startswith("/static/"):
             # Revalidate static assets so a rebuilt add-on always serves fresh

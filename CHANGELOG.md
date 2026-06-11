@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.49
+
+- **Thumbs-down: hide lyrics for a song with no good match.** A new thumbs-down
+  button sits next to the sad-face (bad-match) control. Pressing it means "no good
+  lyrics were found" and **hides the lyrics for this song**; the choice is
+  persisted. When the song plays again the lyrics stay hidden and the thumbs-down
+  is **highlighted**, so you can toggle it off to re-check whether a better option
+  has since become available (then toggle it back on if not). Persistence is the
+  per-song JSON DB (`suppress_lyrics`) via a new `POST /suppress-lyrics`; the
+  +/- provider cycle still works while hidden, so other options remain reachable.
+
 ## 1.0.48
 
 - **Musixmatch no longer discards word-synced-only lyrics.** It previously

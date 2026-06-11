@@ -474,6 +474,24 @@ def test_set_lyric_offset_remembers_and_forgets():
     assert c.runtimes["auto"].timing_offset == 0.0
 
 
+def test_set_suppress_lyrics_toggles_and_persists():
+    """Thumbs-down sets the runtime flag and persists it; toggling off clears it."""
+    c = Controller(ma=None, capture=None)
+    c.runtimes["auto"] = PlayerRuntime(
+        key="auto", track={"title": "Song", "artist": "Artist",
+                           "track_id": "Artist|Song"})
+    saved = {}
+    c.lyrics_service.set_suppress_lyrics = lambda a, t, s: saved.__setitem__("v", s)
+
+    r1 = c.set_suppress_lyrics(None, True)
+    assert r1["suppress_lyrics"] is True and saved["v"] is True
+    assert c.runtimes["auto"].suppress_lyrics is True
+
+    r2 = c.set_suppress_lyrics(None, False)
+    assert r2["suppress_lyrics"] is False and saved["v"] is False
+    assert c.runtimes["auto"].suppress_lyrics is False
+
+
 def test_list_players_dedupes_reconnected_streams():
     """A respeaker that reconnects gets a fresh SSRC, leaving stale sibling streams
     with the same name/MA id. The picker must show ONE entry per device (the active
