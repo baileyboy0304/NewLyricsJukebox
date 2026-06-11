@@ -12,6 +12,12 @@
   track cleared (paused / between songs), `current-track` returns no title and the
   poll returned early *before* updating the transport icon, so it was stuck showing
   the pause symbol forever. The icon is now reset to "play" in that path.
+- **Transport commands no longer fail on a stale stream.** When the respeaker
+  reconnects with a new SSRC, the selected stream key goes stale; `transport` was
+  then passing that raw SSRC to Music Assistant as the player id ("Player <ssrc>
+  is not available"). It now validates the id against MA's player list and, if
+  stale, migrates to the live stream's MA player (or whatever MA reports as
+  playing) — the same migration `current-track` already did.
 
 ## 1.0.44
 

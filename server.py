@@ -613,8 +613,33 @@ class Controller:
 
     # -- transport --------------------------------------------------------- #
 
+    def _live_ma_player_id(self, ma_id, stream_key):
+        """Ensure transport targets a REAL Music Assistant player. A selected RTP
+        stream key goes stale when the respeaker reconnects with a new SSRC;
+        ``_resolve`` then falls back to passing that SSRC as the player id, which MA
+        rejects ("Player <ssrc> is not available"). Validate against MA's player
+        list and, if invalid, migrate to the live stream's MA id (or whatever MA
+        reports as playing)."""
+        if not (self.ma and self.ma.connected):
+            return ma_id
+        players = {p["player_id"] for p in self.ma.list_players()}
+        if ma_id and ma_id in players:
+            return ma_id
+        # Stale/unknown id (e.g. a dead stream's SSRC): migrate to the live RTP
+        # stream's MA player...
+        if self.capture:
+            s = self.capture.get_stream(stream_key) if stream_key else None
+            if not (s and getattr(s, "active", True)):
+                s = self.capture.first_active_stream()
+            if s and s.ma_player_id and s.ma_player_id in players:
+                return s.ma_player_id
+        # ...or whatever MA currently reports as playing.
+        playing = self.ma.find_playing_player_id()
+        return playing if playing in players else None
+
     async def transport(self, param: Optional[str], action: str, position_ms=None) -> dict:
-        key, ma_id, _, _ = self._resolve(param)
+        key, ma_id, stream_key, _ = self._resolve(param)
+        ma_id = self._live_ma_player_id(ma_id, stream_key)
         if not (self.ma and self.ma.connected and ma_id):
             return {"ok": False, "error": "no music assistant player"}
         runtime = self.runtimes.get(key)
