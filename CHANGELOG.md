@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.51
+
+- **A Shazam timeout no longer briefly blanks the lyrics (the "blip").** When a
+  Shazam recognition call hung and hit the 10s safety timeout, it was treated as a
+  no-match; with `blank_after_failures=1` that immediately cleared the held track,
+  fading the lyrics/artwork out for a few seconds before the song was re-detected.
+  A timeout is a recognition hiccup, not evidence the song ended, so it now holds
+  the current track and simply retries next cycle (only genuine no-matches count
+  toward blanking).
+
 ## 1.0.50
 
 - **Fixed the lyric "shudder" on radio — and the ACR-credit burn behind it.**
