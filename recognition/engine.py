@@ -267,14 +267,22 @@ class PlayerRecognizer:
                         result = await asyncio.wait_for(
                             self._recognize_once(audio), timeout=RECOGNIZE_TIMEOUT)
                     except asyncio.TimeoutError:
-                        self._log_outcome("timed out after %.0fs", RECOGNIZE_TIMEOUT)
+                        # A hung Shazam call is a recognition hiccup, NOT evidence
+                        # the song ended. Treating it as a no-match cleared the held
+                        # track (with blank_after_failures=1) and faded the lyrics
+                        # out for a few seconds — the "blip". Hold the current track
+                        # and just try again next cycle.
+                        self._log_outcome("timed out after %.0fs (held)", RECOGNIZE_TIMEOUT)
                         result = None
-                    if result is None:
+                        timed_out = True
+                    else:
+                        timed_out = False
+                    if result is not None:
+                        await self._handle_success(result, audio)
+                    elif not timed_out:
                         hint = " (likely silence)" if level < 100 else ""
                         self._log_outcome("no match (audio level=%d)%s", level, hint)
                         await self._handle_failure()
-                    else:
-                        await self._handle_success(result, audio)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001

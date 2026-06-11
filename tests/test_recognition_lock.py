@@ -151,6 +151,52 @@ def test_recognition_call_times_out_and_loop_continues():
     asyncio.run(scenario())
 
 
+def test_timeout_does_not_clear_held_track():
+    """A hung Shazam call (timeout) is a hiccup, not a song-end: it must NOT clear
+    the held track (the brief lyrics 'blip') or count as a blanking failure."""
+    import asyncio
+    import time
+
+    import numpy as np
+
+    import recognition.engine as eng
+    from recognition.engine import PlayerRecognizer
+    from recognition.result import RecognitionResult
+    from recognition.udp_capture import AudioChunk
+
+    class _AlwaysAudio:
+        async def get_audio(self, duration, key, should_continue=None):
+            return AudioChunk(
+                data=(np.random.randn(16000) * 5000).astype(np.int16),
+                sample_rate=16000, channels=1, duration=1.0,
+                capture_start_time=time.time())
+
+    async def scenario():
+        orig = eng.RECOGNIZE_TIMEOUT
+        eng.RECOGNIZE_TIMEOUT = 0.1
+        try:
+            rec = PlayerRecognizer("z", _AlwaysAudio())
+            rec._interval = 0.02
+            rec._blank_after = 1   # would clear after a single failure
+            rec._current = RecognitionResult(
+                title="T", artist="A", offset=10.0, capture_start_time=time.time())
+
+            async def hang(_audio):
+                await asyncio.sleep(5)   # forces the timeout every cycle
+                return None
+
+            rec._recognize_once = hang
+            rec.start()
+            await asyncio.wait_for(asyncio.sleep(0.5), timeout=2.0)
+            await rec.stop()
+            assert rec._current is not None   # held track survives the timeouts
+            assert rec._failures == 0         # timeout not counted as a failure
+        finally:
+            eng.RECOGNIZE_TIMEOUT = orig
+
+    asyncio.run(scenario())
+
+
 def _acr_recognizer(priority=True, tolerance=5.0):
     """Build a PlayerRecognizer with stubbed Shazam/ACR for ACR-priority tests."""
     from recognition.engine import PlayerRecognizer
