@@ -49,6 +49,25 @@ def _same_recording(a: RecognitionResult, b: RecognitionResult) -> bool:
     return bool(ta and tb) and (ta == tb or ta.startswith(tb) or tb.startswith(ta))
 
 
+def _same_song(a: RecognitionResult, b: Optional[RecognitionResult]) -> bool:
+    """Song-change detection that ignores version-suffix churn. Shazam frequently
+    returns two titles for the SAME audio on alternating cycles — e.g. "Babylon"
+    and "Babylon (UK Radio Mix)", "Angels" and "Angels (Remastered 2004)", "Live
+    It Up (Remastered)" vs "(Acoustic)". The strict title check treated each flip
+    as a brand-new song: it reset the position lock every few seconds (a visible
+    "shudder" as the lyrics jumped) AND spent an ACR credit each time (burning the
+    daily quota). Two reads are the same song when the artist matches and the
+    titles are equal once version noise (mix/edit/remaster/live/...) is stripped."""
+    if b is None:
+        return False
+    na = (a.artist or "").strip().lower()
+    nb = (b.artist or "").strip().lower()
+    if not na or na != nb:
+        return False
+    return (strip_version_noise((a.title or "").strip().lower())
+            == strip_version_noise((b.title or "").strip().lower()))
+
+
 class LockTracker:
     """Converges on a stable song position over several recognitions — the
     "3 attempts before locked" method, with the same state progression the
@@ -268,7 +287,7 @@ class PlayerRecognizer:
     async def _handle_success(self, result: RecognitionResult, audio=None):
         self._failures = 0
         self._paused = False
-        new_song = not result.is_same_song(self._current)
+        new_song = not _same_song(result, self._current)
         if new_song:
             self._lock.reset()
             self._acr_anchored = False

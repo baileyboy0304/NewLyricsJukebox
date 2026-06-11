@@ -12,7 +12,7 @@ import hmac
 import json
 import logging
 import time
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -58,7 +58,10 @@ class ACRCloudRecognizer:
             logger.warning("Could not persist ACRCloud quota: %s", exc)
 
     def _reset_if_new_day(self):
-        today = date.today().isoformat()
+        # ACRCloud's daily counter rolls over at 00:00 UTC (its usage dashboard is
+        # bucketed by UTC calendar date), so reset on the UTC day — not the server's
+        # local day, which could resume ACR hours early/late and waste failed calls.
+        today = datetime.now(timezone.utc).date().isoformat()
         if self._counter_date != today:
             self._requests_today = 0
             self._counter_date = today

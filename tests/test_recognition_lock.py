@@ -190,6 +190,56 @@ def test_same_recording_ignores_version_noise():
     assert _same_recording(a, c) is False
 
 
+def test_same_song_ignores_version_suffix_churn():
+    """Shazam flip-flops the title for the same audio (Babylon / Babylon (UK Radio
+    Mix), Angels / Angels (Remastered 2004), ...). Those must NOT count as a song
+    change. Genuinely different songs still do."""
+    from recognition.engine import _same_song
+    dg = lambda t: make(10, 0, title=t, artist="David Gray")
+    assert _same_song(dg("Babylon (UK Radio Mix)"), dg("Babylon")) is True
+    assert _same_song(make(10, 0, title="Angels (Remastered 2004)", artist="Robbie Williams"),
+                      make(10, 0, title="Angels", artist="Robbie Williams")) is True
+    assert _same_song(dg("Babylon"), make(10, 0, title="Wonderwall", artist="Oasis")) is False
+    assert _same_song(dg("Babylon"), None) is False
+
+
+def test_title_variant_flip_is_not_a_new_song_and_spends_no_extra_acr():
+    """The 'shudder': a version-suffix title flip must not reset the position or
+    spend another ACR credit — ACR fires once for the real song only."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(tolerance=5.0)
+        acr = make(11, 1000.0, title="Babylon", artist="David Gray")
+        acr.provider = "acrcloud"
+        rec._acrcloud = _StubACR(acr)
+        await rec._handle_success(
+            make(10, 1000.0, title="Babylon", artist="David Gray"), audio=object())
+        assert rec._acrcloud.calls == 1 and rec._acr_anchored is True
+        frozen = rec._current
+        # Shazam flips the title to a version variant of the SAME song.
+        await rec._handle_success(
+            make(40, 1030.0, title="Babylon (UK Radio Mix)", artist="David Gray"),
+            audio=object())
+        assert rec._acrcloud.calls == 1     # no extra ACR credit on the flip
+        assert rec._current is frozen       # position not reset / no jump
+
+    asyncio.run(scenario())
+
+
+def test_acrcloud_quota_resets_on_utc_day():
+    """The daily counter must roll over on the UTC calendar day (ACRCloud's
+    reset), not the server's local day."""
+    from datetime import datetime, timezone
+    from recognition.acrcloud import ACRCloudRecognizer
+    r = ACRCloudRecognizer()
+    r._requests_today = 50
+    r._counter_date = "2000-01-01"          # stale
+    r._reset_if_new_day()
+    assert r._requests_today == 0
+    assert r._counter_date == datetime.now(timezone.utc).date().isoformat()
+
+
 def test_acr_priority_carries_spotify_id_when_adopted():
     """When ACR is adopted, its Spotify track id rides along for lyrics lookup."""
     import asyncio
