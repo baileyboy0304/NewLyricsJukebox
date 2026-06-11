@@ -133,6 +133,42 @@ class LyricsService:
         set of providers that returned lyrics, for the +/- provider cycle)."""
         return self._read_db(artist, title)
 
+    def _patch_db(self, artist: str, title: str, **fields) -> None:
+        """Update top-level keys in a song's DB (a value of ``None`` deletes the
+        key). Atomic write under the DB lock. Used for small per-song preferences
+        like the timing offset."""
+        if not FEATURES["save_lyrics_locally"]:
+            return
+        path = _db_path(artist, title)
+        with _db_lock:
+            try:
+                db = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                db = {"artist": artist, "title": title, "saved_lyrics": {},
+                      "word_synced_lyrics": {}, "metadata": {}}
+            for k, v in fields.items():
+                if v is None:
+                    db.pop(k, None)
+                else:
+                    db[k] = v
+            try:
+                tmp = path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(db, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, path)
+            except OSError as exc:  # pragma: no cover
+                logger.warning("Could not patch lyrics DB: %s", exc)
+
+    def set_timing_offset(self, artist: str, title: str, offset: float) -> None:
+        """Persist the user's manual lyric-timing offset (seconds) for this song,
+        so it's reapplied when the song plays again (the 'memory' feature)."""
+        self._patch_db(artist, title, timing_offset=float(offset))
+        logger.info("lyrics timing offset for %s - %s -> %+.2fs", artist, title, offset)
+
+    def clear_timing_offset(self, artist: str, title: str) -> None:
+        """Forget a song's stored timing offset (memory unticked)."""
+        self._patch_db(artist, title, timing_offset=None)
+        logger.info("lyrics timing offset cleared for %s - %s", artist, title)
+
     # -- provider cycling (manual +/- selection) -------------------------- #
 
     def enabled_provider_names(self) -> List[str]:

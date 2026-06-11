@@ -36,6 +36,20 @@
       <span id="time-dur" class="time">0:00</span>
     </div>
     <div class="controls-row">
+      <div id="sync-cluster" class="sync-cluster">
+        <div class="sync-adjust">
+          <button id="btn-sync-minus" class="prov-btn" title="Lyrics earlier (advance)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+          </button>
+          <span id="sync-value" class="sync-value">0.00s</span>
+          <button id="btn-sync-plus" class="prov-btn" title="Lyrics later (delay)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg>
+          </button>
+        </div>
+        <label class="sync-memory">
+          <input type="checkbox" id="sync-memory" /> memory
+        </label>
+      </div>
       <div class="controls">
         <button id="btn-prev" class="ctrl-btn" title="Previous">
           <svg viewBox="0 0 24 24" aria-hidden="true">

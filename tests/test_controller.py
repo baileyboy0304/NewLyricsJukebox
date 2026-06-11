@@ -454,6 +454,26 @@ def test_transport_passes_through_valid_ma_id():
     asyncio.run(scenario())
 
 
+def test_set_lyric_offset_remembers_and_forgets():
+    """memory ON stores the offset on the song; memory OFF resets to 0 and clears
+    the stored value."""
+    c = Controller(ma=None, capture=None)
+    c.runtimes["auto"] = PlayerRuntime(
+        key="auto", track={"title": "Song", "artist": "Artist",
+                           "track_id": "Artist|Song"})
+    stored = {}
+    c.lyrics_service.set_timing_offset = lambda a, t, o: stored.__setitem__("v", o)
+    c.lyrics_service.clear_timing_offset = lambda a, t: stored.pop("v", None)
+
+    r1 = c.set_lyric_offset(None, 0.5, True)        # memory on -> remember
+    assert r1["timing_offset"] == 0.5 and stored["v"] == 0.5
+    assert c.runtimes["auto"].timing_offset == 0.5
+
+    r2 = c.set_lyric_offset(None, 0.5, False)       # memory off -> forget + reset
+    assert r2["timing_offset"] == 0.0 and "v" not in stored
+    assert c.runtimes["auto"].timing_offset == 0.0
+
+
 def test_list_players_dedupes_reconnected_streams():
     """A respeaker that reconnects gets a fresh SSRC, leaving stale sibling streams
     with the same name/MA id. The picker must show ONE entry per device (the active

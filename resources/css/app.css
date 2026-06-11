@@ -118,6 +118,41 @@ body {
   gap: 2rem;
 }
 
+/* Lyric-sync nudge: pinned to the LEFT of the transport row, mirroring the
+   provider +/- on the right. A -/value/+ adjuster (0.25s steps) over a "memory"
+   checkbox that remembers the offset per song. */
+.sync-cluster {
+  position: absolute;
+  left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+.sync-adjust {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.sync-value {
+  min-width: 3.4rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.sync-memory {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.sync-memory input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+.sync-cluster.hidden { display: none; }
+
 /* Lyrics-provider cycle: same Lucide stroke style as transport, ~25% smaller. */
 .provider-cycle {
   position: absolute;

@@ -210,6 +210,18 @@ def test_set_bad_match_index_persists():
     assert svc._read_db(artist, title)["bad_match_index"] == 2
 
 
+def test_timing_offset_persist_and_clear():
+    """The 'memory' feature: a song's timing offset is stored and reapplied, and
+    cleared (forgotten) when memory is unticked."""
+    svc = service()
+    artist, title = "A", f"Offset-{uuid.uuid4()}"
+    svc._write_provider(artist, title, "lrclib", [(0.0, "x")], {}, [])
+    svc.set_timing_offset(artist, title, 0.5)
+    assert svc._read_db(artist, title)["timing_offset"] == 0.5
+    svc.clear_timing_offset(artist, title)
+    assert "timing_offset" not in svc._read_db(artist, title)
+
+
 def test_isrc_passed_only_to_providers_that_accept_it():
     """Shazam's ISRC must reach providers that accept ``isrc`` (Musixmatch) and be
     ignored by those that don't — alongside any Spotify id, without TypeErrors."""
