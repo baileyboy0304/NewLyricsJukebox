@@ -61,6 +61,28 @@ class Controller:
         streams = self.capture.list_streams() if self.capture else []
         ma_players = self.ma.list_players() if (self.ma and self.ma.connected) else []
 
+        # Collapse multiple RTP streams from the SAME device to one entry. A
+        # respeaker reconnects with a fresh SSRC, leaving stale siblings behind
+        # (same name + IP / MA id) that would otherwise each show in the picker.
+        # Keep the active one, else the most-recently-seen.
+        def identity(s):
+            return s.get("ma_player_id") or (s.get("name"), s.get("source_ip"))
+        best = {}
+        for s in streams:
+            # Only de-dupe streams that have an identity to share; keep anonymous
+            # ones (no MA id and no name) separate so distinct devices aren't merged.
+            if not s.get("ma_player_id") and not s.get("name"):
+                best[s["key"]] = s
+                continue
+            ident = identity(s)
+            cur = best.get(ident)
+            if (cur is None
+                    or (s.get("active") and not cur.get("active"))
+                    or (s.get("active") == cur.get("active")
+                        and s.get("last_seen", 0) > cur.get("last_seen", 0))):
+                best[ident] = s
+        streams = list(best.values())
+
         assigned_keys = set()
         players = []
         for c in configured:

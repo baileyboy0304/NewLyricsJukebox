@@ -374,6 +374,43 @@ def test_resolve_stream_key_migrates_off_dead_selected_stream():
     assert c._resolve_stream_key("73d34824", "a0505ec6") == "ae0d58dd"
 
 
+def test_list_players_dedupes_reconnected_streams():
+    """A respeaker that reconnects gets a fresh SSRC, leaving stale sibling streams
+    with the same name/MA id. The picker must show ONE entry per device (the active
+    / freshest), not one per SSRC."""
+    class _Cap:
+        def list_streams(self):
+            return [
+                {"key": "aaa", "name": "respeaker_lyrics", "ma_player_id": "id1",
+                 "source_ip": "1.2.3.4", "ssrc": "aaa", "active": False, "last_seen": 100},
+                {"key": "bbb", "name": "respeaker_lyrics", "ma_player_id": "id1",
+                 "source_ip": "1.2.3.4", "ssrc": "bbb", "active": True, "last_seen": 200},
+                {"key": "ccc", "name": "respeaker_lyrics", "ma_player_id": "id1",
+                 "source_ip": "1.2.3.4", "ssrc": "ccc", "active": False, "last_seen": 150},
+            ]
+
+    c = Controller(ma=None, capture=_Cap())
+    out = c.list_players()
+    assert len(out["players"]) == 1            # three SSRCs -> one device
+    assert out["players"][0]["key"] == "bbb"   # the active stream wins
+
+
+def test_list_players_keeps_distinct_devices_separate():
+    """Two genuinely different devices (different MA ids) must NOT be merged."""
+    class _Cap:
+        def list_streams(self):
+            return [
+                {"key": "aaa", "name": "kitchen", "ma_player_id": "id1",
+                 "source_ip": "1.2.3.4", "ssrc": "aaa", "active": True, "last_seen": 100},
+                {"key": "bbb", "name": "lounge", "ma_player_id": "id2",
+                 "source_ip": "1.2.3.5", "ssrc": "bbb", "active": True, "last_seen": 100},
+            ]
+
+    c = Controller(ma=None, capture=_Cap())
+    out = c.list_players()
+    assert len(out["players"]) == 2
+
+
 def test_only_one_recognizer_runs_at_a_time():
     """Switching streams must stop the previous recognizer (no pile-up that
     bombards Shazam in parallel)."""
