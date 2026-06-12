@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.52
+
+- **Keep the first-detected lyric variant for a song (fixes wrong/desynced lyrics
+  on radio mixes).** Shazam flips the title between e.g. `Babylon` and `Babylon
+  (UK Radio Mix)` for the same audio. Since 1.0.50 those correctly count as the
+  same song (no position shudder), but whichever flip happened to win the lock
+  also became the displayed title — and `Babylon` (album) vs `Babylon (UK Radio
+  Mix)` (radio edit) have **different lyric files with different timings**, so
+  freezing the wrong one showed lyrics that didn't match the audio even though the
+  position was right. The song now keeps its **first-detected** title and lyric
+  variant for its whole duration; later reads still refine the position but no
+  longer swap the lyric file.
+
 ## 1.0.51
 
 - **A Shazam timeout no longer briefly blanks the lyrics (the "blip").** When a
