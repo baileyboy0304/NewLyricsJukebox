@@ -273,6 +273,27 @@ def test_title_variant_flip_is_not_a_new_song_and_spends_no_extra_acr():
     asyncio.run(scenario())
 
 
+def test_variant_flip_keeps_first_title_but_refines_position():
+    """The radio plays one version (UK Radio Mix) but Shazam flips the title; the
+    served title/lyric variant must stay the FIRST-detected one (so the right
+    lyric file is used) while the position still refines from later reads."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)   # ACR off -> pure lock behaviour
+        await rec._handle_success(
+            make(2, 1000.0, title="Babylon (UK Radio Mix)", artist="David Gray"))
+        assert rec._current.title == "Babylon (UK Radio Mix)"
+        # Same song, but Shazam flips the title to the album variant with a
+        # refined (in-sync) position.
+        await rec._handle_success(
+            make(8, 1006.0, title="Babylon", artist="David Gray"))
+        assert rec._current.title == "Babylon (UK Radio Mix)"  # variant preserved
+        assert rec._current.offset == 8                        # position refined
+
+    asyncio.run(scenario())
+
+
 def test_acrcloud_quota_resets_on_utc_day():
     """The daily counter must roll over on the UTC calendar day (ACRCloud's
     reset), not the server's local day."""

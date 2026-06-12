@@ -14,6 +14,7 @@ fallback, so a no-match (advert / DJ talk / silence) never spends a credit.
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from typing import Callable, Optional
 
 from config import AUDIO_RECOGNITION, UDP_AUDIO
@@ -313,9 +314,22 @@ class PlayerRecognizer:
         else:
             status = self._lock.offer(result)
             if status not in ("ignored", "outlier"):
-                # refine while converging, or jump to a re-acquired timeline.
-                # 'ignored'/'outlier' -> hold the current position unchanged.
-                self._current = result
+                # Refine the position from this read, but KEEP the song's
+                # first-detected title and lyric variant. Shazam flips e.g.
+                # "Babylon" <-> "Babylon (UK Radio Mix)" for the same audio, and
+                # those have different lyric files/timings — letting a later flip
+                # overwrite the title swaps in the wrong (desynced) lyrics for the
+                # rest of the song. Only the position fields move.
+                self._current = replace(
+                    result,
+                    title=self._current.title,
+                    artist=self._current.artist,
+                    album=self._current.album,
+                    album_art_url=self._current.album_art_url or result.album_art_url,
+                    spotify_id=self._current.spotify_id or result.spotify_id,
+                    isrc=self._current.isrc or result.isrc,
+                    duration=self._current.duration or result.duration,
+                )
         self._log_recognition(result, status)
         if self._on_update:
             self._on_update(self)
