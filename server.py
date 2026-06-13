@@ -642,12 +642,21 @@ class Controller:
         artist = runtime.track.get("artist") or ""
         title = runtime.track.get("title") or ""
         if remember:
-            runtime.timing_offset = float(offset or 0.0)
-            self.lyrics_service.set_timing_offset(artist, title, runtime.timing_offset)
+            new_offset = float(offset or 0.0)
+            self.lyrics_service.set_timing_offset(artist, title, new_offset)
         else:
-            runtime.timing_offset = 0.0
+            new_offset = 0.0
             self.lyrics_service.clear_timing_offset(artist, title)
-        return {"ok": True, "timing_offset": runtime.timing_offset}
+        # Push the new value to EVERY runtime currently on this song, not just the
+        # caller's. Other clients (web tabs, ESP32 bridge) read their own runtime's
+        # timing_offset on each /lyrics poll; without this they'd keep serving the
+        # value loaded at track start and only pick up the change on the next play.
+        runtime.timing_offset = new_offset
+        lyrics_key = f"{artist}|{title}"
+        for rt in self.runtimes.values():
+            if rt is not runtime and rt.lyrics_key == lyrics_key:
+                rt.timing_offset = new_offset
+        return {"ok": True, "timing_offset": new_offset}
 
     def set_suppress_lyrics(self, param: Optional[str], suppress: bool) -> dict:
         """Thumbs-down: the user judged this song has no good lyrics. Persist the
