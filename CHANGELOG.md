@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.54
+## 1.0.55
 
 - **Blank lyric lines no longer blank the display.** Providers include timestamped
   empty lines for the gaps between sung lines, which were rendered as an empty
