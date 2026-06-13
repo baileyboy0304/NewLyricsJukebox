@@ -474,6 +474,30 @@ def test_set_lyric_offset_remembers_and_forgets():
     assert c.runtimes["auto"].timing_offset == 0.0
 
 
+def test_set_lyric_offset_propagates_to_other_runtimes_on_same_song():
+    """An offset change from one client is pushed to every runtime currently on the
+    same song, so other clients (e.g. the ESP32 bridge) pick it up on their next
+    /lyrics poll instead of only at the song's next play."""
+    c = Controller(ma=None, capture=None)
+    c.lyrics_service.set_timing_offset = lambda a, t, o: None
+    c.lyrics_service.clear_timing_offset = lambda a, t: None
+    # Two players on the same song; a third on a different song must NOT change.
+    c.runtimes["web"] = PlayerRuntime(
+        key="web", track={"title": "Song", "artist": "Artist"},
+        lyrics_key="Artist|Song")
+    c.runtimes["esp32"] = PlayerRuntime(
+        key="esp32", track={"title": "Song", "artist": "Artist"},
+        lyrics_key="Artist|Song")
+    c.runtimes["other"] = PlayerRuntime(
+        key="other", track={"title": "Else", "artist": "Artist"},
+        lyrics_key="Artist|Else")
+
+    c.set_lyric_offset("web", 0.75, True)
+    assert c.runtimes["web"].timing_offset == 0.75
+    assert c.runtimes["esp32"].timing_offset == 0.75   # propagated
+    assert c.runtimes["other"].timing_offset == 0.0     # untouched
+
+
 def test_set_suppress_lyrics_toggles_and_persists():
     """Thumbs-down sets the runtime flag and persists it; toggling off clears it."""
     c = Controller(ma=None, capture=None)
