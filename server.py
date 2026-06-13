@@ -15,7 +15,7 @@ from quart import Quart, jsonify, render_template, request
 
 from classify import classify_source_mode
 from config import LYRICS, PLAYERS, RESOURCES_DIR, SERVER, VERSION
-from lyrics import LyricsData, LyricsService, alternate_queries
+from lyrics import LyricsData, LyricsService, visible_lines, alternate_queries
 from ma_models import PlayerState
 
 logger = logging.getLogger(__name__)
@@ -438,7 +438,8 @@ class Controller:
             "has_word_sync": data.has_word_sync,
             "pending": False,
             "lines": lines,
-            "line_synced": [{"start": s, "text": t} for s, t in data.line_synced],
+            "line_synced": [{"start": s, "text": t}
+                            for s, t in visible_lines(data.line_synced)],
             "word_synced": data.word_synced,
             "timing_offset": timing_offset,
             "suppress_lyrics": suppress_lyrics,
