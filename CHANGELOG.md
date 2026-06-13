@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.53
+
+- **Lyric-timing offset changes propagate live to all clients on the same song.**
+  A +/- nudge in one client is now pushed to every player runtime currently on
+  that song, so other clients (e.g. the ESP32 bridge) pick it up on their next
+  `/lyrics` poll instead of only at the song's next play — no extra DB read on the
+  poll hot path.
+
 ## 1.0.52
 
 - **Keep the first-detected lyric variant for a song (fixes wrong/desynced lyrics
