@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.54
+
+- **Blank lyric lines no longer blank the display.** Providers include timestamped
+  empty lines for the gaps between sung lines, which were rendered as an empty
+  "current" line — the lyrics flashed blank mid-song. Those blank entries are now
+  ignored, so the previous line stays shown until the next real line is due.
+  Applied at the source, so both the web UI and poll-based clients (ESP32 bridge)
+  benefit.
+
 ## 1.0.53
 
 - **Lyric-timing offset changes propagate live to all clients on the same song.**

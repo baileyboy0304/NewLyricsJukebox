@@ -290,6 +290,17 @@ def test_lines_around_before_start():
     assert around["current"] == ""
 
 
+def test_lines_around_holds_previous_over_blank_gap():
+    """Blank-text gap lines are ignored: the previous real line stays current
+    until the next real line is due (instead of going blank mid-song)."""
+    data = LyricsData(artist="A", title="B", line_synced=[
+        (0.0, "one"), (5.0, ""), (10.0, "two"),
+    ])
+    # Position sits inside the blank entry's window -> hold "one", not "".
+    around = LyricsService.lines_around(data, 7.0)
+    assert around == {"previous": "", "current": "one", "next": "two"}
+
+
 def test_provider_names_in_ordered_by_priority():
     """The +/- cycle lists every provider that returned lyrics, by priority."""
     svc = service()

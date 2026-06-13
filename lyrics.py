@@ -110,6 +110,14 @@ def _normalize_result(raw) -> Tuple[List[Tuple[float, str]], dict, List[dict]]:
     return [], {}, []
 
 
+def visible_lines(lines: List[Tuple[float, str]]) -> List[Tuple[float, str]]:
+    """Drop blank-text entries from a synced-lyric list. Providers (LRCLIB et al.)
+    include timestamped empty lines for the gaps between sung lines; rendered as
+    the 'current' line they blank the display mid-song. Removing them lets the
+    previous real line stay active until the next one is due."""
+    return [(s, t) for s, t in lines if t and t.strip()]
+
+
 class LyricsService:
     def __init__(self):
         self.providers = sorted(
@@ -485,7 +493,7 @@ class LyricsService:
     @staticmethod
     def lines_around(data: LyricsData, position: float) -> Dict[str, str]:
         """Return previous / current / next line text for a given position."""
-        lines = data.line_synced
+        lines = visible_lines(data.line_synced)
         if not lines:
             return {"previous": "", "current": "", "next": ""}
         idx = -1
