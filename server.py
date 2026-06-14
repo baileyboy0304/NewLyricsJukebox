@@ -42,6 +42,7 @@ class PlayerRuntime:
     bad_match_index: int = 0          # "bad match" rescue level (cleaned-search variant)
     timing_offset: float = 0.0        # manual lyric-timing offset (s), remembered per song
     suppress_lyrics: bool = False     # user flagged "no good lyrics" -> hide for this song
+    rec_stream: Optional[str] = None  # RTP stream this player recognizes on (None = metadata-driven)
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
@@ -240,49 +241,43 @@ class Controller:
             return s2.key
         return stream_key if s is not None else None
 
-    async def _ensure_recognizer(self, key, stream_key):
-        """Ensure ONE recognizer for THIS player (keyed by player), bound to
-        ``stream_key``. Per-player — unlike the old single-recognizer rule, several
-        players can recognize at once (one ESPHome mic each). The supervisor owns
-        teardown, so this never stops another player's recognizer; it only restarts
-        its own when the stream changes (respeaker reconnects with a new SSRC).
+    async def _ensure_recognizer(self, stream_key):
+        """Ensure exactly ONE recognizer per STREAM. Several players (web tabs, an
+        ESPHome display, stale/duplicate ids that resolve to the same device) can
+        all point at one RTP stream — they must SHARE a single recognizer, not each
+        spin up their own and triple the Shazam load. Different streams still get
+        their own recognizer, so genuinely distinct mics recognize in parallel.
 
-        Held under ``_rec_lock`` so a concurrent call can't create a second
-        recognizer for the same player in the stop/start window."""
+        Non-destructive: never stops another stream's recognizer (the supervisor
+        owns teardown). Held under ``_rec_lock`` so concurrent ticks can't create
+        two recognizers for one stream."""
         async with self._rec_lock:
-            entry = self.recognizers.get(key)
-            if entry is not None and entry[1] != stream_key:
-                await entry[0].stop()
-                logger.info("Stopped recognizer for player %s (stream changed)", key)
-                self.recognizers.pop(key, None)
-                entry = None
             if not stream_key or not self.capture:
-                return entry[0] if entry else None
-            if entry is None:
+                return None
+            rec = self.recognizers.get(stream_key)
+            if rec is None:
                 from recognition.engine import PlayerRecognizer
                 rec = PlayerRecognizer(stream_key, self.capture)
                 rec.start()
-                self.recognizers[key] = (rec, stream_key)
-                logger.info("Started recognizer for player %s (stream %s)", key, stream_key)
-                return rec
-            return entry[0]
+                self.recognizers[stream_key] = rec
+                logger.info("Started recognizer for stream %s", stream_key)
+            return rec
 
-    async def _stop_recognizer(self, key):
-        """Stop a single player's recognizer (metadata took over, or its lease
-        lapsed). No-op if it isn't running."""
+    async def _stop_stream_recognizer(self, stream_key):
+        """Stop a single stream's recognizer (no player needs it any more)."""
         async with self._rec_lock:
-            entry = self.recognizers.pop(key, None)
-        if entry is not None:
-            await entry[0].stop()
-            logger.info("Stopped recognizer for player %s", key)
+            rec = self.recognizers.pop(stream_key, None)
+        if rec is not None:
+            await rec.stop()
+            logger.info("Stopped recognizer for stream %s", stream_key)
 
     async def _stop_all_recognizers(self):
         async with self._rec_lock:
-            entries = list(self.recognizers.items())
+            items = list(self.recognizers.items())
             self.recognizers.clear()
-        for key, (rec, _stream) in entries:
+        for stream_key, rec in items:
             await rec.stop()
-            logger.info("Stopped recognizer for player %s", key)
+            logger.info("Stopped recognizer for stream %s", stream_key)
 
     # -- engine supervisor (lease-driven) --------------------------------- #
 
@@ -329,9 +324,13 @@ class Controller:
                 await self.current_track(k)
             except Exception:  # noqa: BLE001
                 logger.exception("pipeline tick failed for %s", k)
-        for k in list(self.recognizers):
-            if k not in desired:
-                await self._stop_recognizer(k)
+        # Keep only the recognizers some desired player is actually recognizing on
+        # (several players can share one stream). Streams nobody needs are stopped.
+        wanted_streams = {rt.rec_stream for k in desired
+                          if (rt := self.runtimes.get(k)) and rt.rec_stream}
+        for stream_key in list(self.recognizers):
+            if stream_key not in wanted_streams:
+                await self._stop_stream_recognizer(stream_key)
 
     async def run_supervisor(self, interval: float = 1.0):
         while True:
@@ -436,7 +435,7 @@ class Controller:
             track = self._ma_track(state, name)
             runtime.mode = track["source"]
             runtime.track = track
-            await self._stop_recognizer(key)        # MA describes it; no recognition
+            runtime.rec_stream = None               # MA describes it; no recognition
             self._log_mode(runtime, name, track["source"], track["title"])
             return track
 
@@ -467,7 +466,7 @@ class Controller:
                     track = self._ma_track(state2, name)
                     runtime.mode = track["source"]
                     runtime.track = track
-                    await self._stop_recognizer(key)
+                    runtime.rec_stream = None
                     self._log_mode(runtime, track["player"], track["source"], track["title"])
                     return track
 
@@ -478,10 +477,12 @@ class Controller:
             return runtime.track
 
         # 3) FALLBACK: recognition, for streams MA can't describe (e.g. radio with
-        #    no now-playing metadata). Exactly one recognizer runs at a time.
+        #    no now-playing metadata). One recognizer per stream, shared by every
+        #    player pointing at it.
         runtime.mode = "stream"
         stream_key = self._resolve_stream_key(stream_key, ma_id)
-        rec = await self._ensure_recognizer(key, stream_key)
+        runtime.rec_stream = stream_key
+        rec = await self._ensure_recognizer(stream_key)
         result = rec.current if rec else None
         if result is None:
             self._log_mode(runtime, name, "stream", None,
