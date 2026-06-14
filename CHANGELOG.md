@@ -11,6 +11,12 @@
   RTP stream share a single recognizer, while genuinely distinct mics still
   recognize in parallel. The supervisor keeps only the streams a leased player is
   actually recognizing on (`PlayerRuntime.rec_stream`) and tears down the rest.
+- **Fix lyric "shudder" introduced by the lease engine.** Since 1.0.57 the supervisor
+  recomputed a player's position only ~once/second, but the browser polls ~10x/s and
+  re-anchors its flywheel each time — so it kept getting yanked back to the stale
+  per-second position, jittering the active lyric line back and forth. `/current-track`
+  now reports a **live position**, extrapolated from when it was computed, so each poll
+  sees a smoothly-advancing value (as the old per-poll recompute did).
 
 ## 1.0.57
 

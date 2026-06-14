@@ -43,6 +43,7 @@ class PlayerRuntime:
     timing_offset: float = 0.0        # manual lyric-timing offset (s), remembered per song
     suppress_lyrics: bool = False     # user flagged "no good lyrics" -> hide for this song
     rec_stream: Optional[str] = None  # RTP stream this player recognizes on (None = metadata-driven)
+    position_at: float = 0.0          # wall-clock when track["position"] was computed (for live extrapolation)
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
@@ -295,10 +296,18 @@ class Controller:
         key, _ma_id, _stream_key, name = self._resolve(param)
         name = self._friendly_name(key, name)
         rt = self.runtimes.get(key)
-        if rt is not None and rt.track:
-            return rt.track
-        return {"source": rt.mode if rt else "stream", "player": name,
-                "title": None, "artist": None, "is_playing": False, "seekable": False}
+        if rt is None or not rt.track:
+            return {"source": rt.mode if rt else "stream", "player": name,
+                    "title": None, "artist": None, "is_playing": False, "seekable": False}
+        track = rt.track
+        # The supervisor only recomputes the position ~once/second, but the browser
+        # polls ~10x/s and re-anchors its flywheel each time — anchoring on a frozen
+        # value yanks the clock backwards (a visible lyric shudder). Advance the
+        # position by the time elapsed since it was computed so each poll sees a
+        # smoothly-progressing value, like the old per-poll recompute did.
+        if track.get("is_playing") and track.get("position") is not None and rt.position_at:
+            track = {**track, "position": track["position"] + (time.time() - rt.position_at)}
+        return track
 
     def _player_active(self, key: str) -> bool:
         """Worth running the pipeline for? An RTP stream player must have a live
@@ -435,6 +444,7 @@ class Controller:
             track = self._ma_track(state, name)
             runtime.mode = track["source"]
             runtime.track = track
+            runtime.position_at = time.time()
             runtime.rec_stream = None               # MA describes it; no recognition
             self._log_mode(runtime, name, track["source"], track["title"])
             return track
@@ -466,6 +476,7 @@ class Controller:
                     track = self._ma_track(state2, name)
                     runtime.mode = track["source"]
                     runtime.track = track
+                    runtime.position_at = time.time()
                     runtime.rec_stream = None
                     self._log_mode(runtime, track["player"], track["source"], track["title"])
                     return track
@@ -511,6 +522,7 @@ class Controller:
         }
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         runtime.track = track
+        runtime.position_at = time.time()
         self._log_mode(runtime, name, "stream", track.get("title"))
         return track
 

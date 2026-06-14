@@ -700,6 +700,23 @@ def test_supervisor_shares_one_recognizer_across_players_on_same_stream():
     asyncio.run(scenario())
 
 
+def test_track_snapshot_advances_position_between_supervisor_ticks():
+    """The snapshot must report a live, forward-moving position (extrapolated from
+    when it was computed), so the browser flywheel isn't re-anchored backwards to a
+    stale once-a-second value (the lyric shudder)."""
+    c = Controller(ma=None, capture=None)
+    rt = PlayerRuntime(key="p", mode="stream")
+    rt.track = {"source": "stream", "player": "Mic", "title": "Song",
+                "position": 100.0, "is_playing": True, "seekable": False}
+    rt.position_at = time.time() - 2.0       # computed 2s ago
+    c.runtimes["p"] = rt
+    snap = c.track_snapshot("p")
+    assert 101.8 <= snap["position"] <= 102.5   # advanced ~2s, never went backwards
+    # Paused tracks are not extrapolated.
+    rt.track["is_playing"] = False
+    assert c.track_snapshot("p")["position"] == 100.0
+
+
 def test_track_snapshot_is_read_only_and_starts_no_recognition():
     """The HTTP read path returns last-computed state and never starts a
     recognizer — only the supervisor drives recognition now."""
