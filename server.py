@@ -20,6 +20,11 @@ from ma_models import PlayerState
 
 logger = logging.getLogger(__name__)
 
+# How long a player's engine keeps running after its last poll. Any consumer
+# (web page or ESPHome display) polling within this window keeps recognition alive;
+# once nothing polls for this long, the supervisor tears the pipeline down.
+LEASE_TTL = 6.0
+
 
 @dataclass
 class PlayerRuntime:
@@ -47,14 +52,20 @@ class Controller:
         self.ma = ma
         self.capture = capture
         self.lyrics_service = LyricsService()
-        self.recognizers: Dict[str, "object"] = {}
-        # Serializes recognizer start/stop so overlapping current-track polls can't
-        # interleave mid-swap and leave two recognizers running for one player
-        # (the browser polls ~10x/s, so _set_active_recognizer races itself).
+        # player key -> (PlayerRecognizer, stream_key). One recognizer per player.
+        self.recognizers: Dict[str, tuple] = {}
+        # Serializes recognizer start/stop so a concurrent call can't leave two
+        # recognizers running for one player.
         self._rec_lock = asyncio.Lock()
         self.runtimes: Dict[str, PlayerRuntime] = {}
         # display-name overrides set via the rename UI
         self.renames: Dict[str, str] = {}
+        # Engine leases: player key -> expiry timestamp. Any consumer (web page or
+        # ESPHome display) polling /current-track or /lyrics renews the lease; the
+        # supervisor runs the pipeline only for players with a live lease. This is
+        # what lets an ESPHome display drive its own lyrics without a web page open.
+        self.leases: Dict[str, float] = {}
+        self._supervisor_task: Optional[asyncio.Task] = None
 
     # -- player discovery / resolution ------------------------------------ #
 
@@ -229,37 +240,123 @@ class Controller:
             return s2.key
         return stream_key if s is not None else None
 
-    async def _set_active_recognizer(self, stream_key):
-        """Run AT MOST ONE recognizer — for the currently selected stream. Any
-        recognizer for a different (often stale, new-SSRC) stream is stopped, so
-        we don't pile up recognizers all hammering Shazam in parallel.
+    async def _ensure_recognizer(self, key, stream_key):
+        """Ensure ONE recognizer for THIS player (keyed by player), bound to
+        ``stream_key``. Per-player — unlike the old single-recognizer rule, several
+        players can recognize at once (one ESPHome mic each). The supervisor owns
+        teardown, so this never stops another player's recognizer; it only restarts
+        its own when the stream changes (respeaker reconnects with a new SSRC).
 
-        Held under ``_rec_lock``: the stop step awaits, and without the lock a
-        concurrent poll could create a recognizer in that window, leaving two
-        running for one player (the duplicate-everything bug)."""
+        Held under ``_rec_lock`` so a concurrent call can't create a second
+        recognizer for the same player in the stop/start window."""
         async with self._rec_lock:
-            for key in list(self.recognizers):
-                if key != stream_key:
-                    rec = self.recognizers.pop(key)
-                    await rec.stop()
-                    logger.info("Stopped recognizer for stream %s", key)
+            entry = self.recognizers.get(key)
+            if entry is not None and entry[1] != stream_key:
+                await entry[0].stop()
+                logger.info("Stopped recognizer for player %s (stream changed)", key)
+                self.recognizers.pop(key, None)
+                entry = None
             if not stream_key or not self.capture:
-                return None
-            rec = self.recognizers.get(stream_key)
-            if rec is None:
+                return entry[0] if entry else None
+            if entry is None:
                 from recognition.engine import PlayerRecognizer
                 rec = PlayerRecognizer(stream_key, self.capture)
                 rec.start()
-                self.recognizers[stream_key] = rec
-                logger.info("Started recognizer for stream %s", stream_key)
-            return rec
+                self.recognizers[key] = (rec, stream_key)
+                logger.info("Started recognizer for player %s (stream %s)", key, stream_key)
+                return rec
+            return entry[0]
+
+    async def _stop_recognizer(self, key):
+        """Stop a single player's recognizer (metadata took over, or its lease
+        lapsed). No-op if it isn't running."""
+        async with self._rec_lock:
+            entry = self.recognizers.pop(key, None)
+        if entry is not None:
+            await entry[0].stop()
+            logger.info("Stopped recognizer for player %s", key)
 
     async def _stop_all_recognizers(self):
         async with self._rec_lock:
-            for key in list(self.recognizers):
-                rec = self.recognizers.pop(key)
-                await rec.stop()
-                logger.info("Stopped recognizer for stream %s", key)
+            entries = list(self.recognizers.items())
+            self.recognizers.clear()
+        for key, (rec, _stream) in entries:
+            await rec.stop()
+            logger.info("Stopped recognizer for player %s", key)
+
+    # -- engine supervisor (lease-driven) --------------------------------- #
+
+    def touch_lease(self, param: Optional[str]) -> str:
+        """Renew (or create) the engine lease for the player ``param`` resolves to.
+        Called on every /current-track and /lyrics poll, by any consumer."""
+        key = self._resolve(param)[0]
+        self.leases[key] = time.time() + LEASE_TTL
+        return key
+
+    def track_snapshot(self, param: Optional[str]) -> dict:
+        """Read-only view of a player's current track. The HTTP layer never drives
+        recognition any more — the supervisor does — so this just returns whatever
+        the pipeline last computed (or a 'recognizing' placeholder)."""
+        key, _ma_id, _stream_key, name = self._resolve(param)
+        name = self._friendly_name(key, name)
+        rt = self.runtimes.get(key)
+        if rt is not None and rt.track:
+            return rt.track
+        return {"source": rt.mode if rt else "stream", "player": name,
+                "title": None, "artist": None, "is_playing": False, "seekable": False}
+
+    def _player_active(self, key: str) -> bool:
+        """Worth running the pipeline for? An RTP stream player must have a live
+        stream (no point recognizing silence); players without a gaugeable stream
+        (pure MA / Spotify Connect) are cheap (metadata-first, no recognition) so
+        they stay desired while leased."""
+        _k, _ma_id, stream_key, _n = self._resolve(key)
+        if self.capture and stream_key:
+            s = self.capture.get_stream(stream_key)
+            if s is not None:
+                return bool(getattr(s, "active", False))
+        return True
+
+    async def supervise_once(self):
+        """One reconcile tick: run the pipeline for every leased+active player and
+        tear down recognizers for everyone else."""
+        now_ts = time.time()
+        for k in [k for k, exp in self.leases.items() if exp <= now_ts]:
+            del self.leases[k]
+        desired = {k for k in self.leases if self._player_active(k)}
+        for k in desired:
+            try:
+                await self.current_track(k)
+            except Exception:  # noqa: BLE001
+                logger.exception("pipeline tick failed for %s", k)
+        for k in list(self.recognizers):
+            if k not in desired:
+                await self._stop_recognizer(k)
+
+    async def run_supervisor(self, interval: float = 1.0):
+        while True:
+            try:
+                await self.supervise_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("supervisor tick failed")
+            await asyncio.sleep(interval)
+
+    def start_supervisor(self):
+        if self._supervisor_task is None:
+            self._supervisor_task = asyncio.create_task(self.run_supervisor())
+            logger.info("Engine supervisor started")
+
+    async def stop_supervisor(self):
+        if self._supervisor_task is not None:
+            self._supervisor_task.cancel()
+            try:
+                await self._supervisor_task
+            except asyncio.CancelledError:
+                pass
+            self._supervisor_task = None
+        await self._stop_all_recognizers()
 
     # -- current track ----------------------------------------------------- #
 
@@ -339,7 +436,7 @@ class Controller:
             track = self._ma_track(state, name)
             runtime.mode = track["source"]
             runtime.track = track
-            await self._stop_all_recognizers()      # MA describes it; no recognition
+            await self._stop_recognizer(key)        # MA describes it; no recognition
             self._log_mode(runtime, name, track["source"], track["title"])
             return track
 
@@ -370,7 +467,7 @@ class Controller:
                     track = self._ma_track(state2, name)
                     runtime.mode = track["source"]
                     runtime.track = track
-                    await self._stop_all_recognizers()
+                    await self._stop_recognizer(key)
                     self._log_mode(runtime, track["player"], track["source"], track["title"])
                     return track
 
@@ -384,7 +481,7 @@ class Controller:
         #    no now-playing metadata). Exactly one recognizer runs at a time.
         runtime.mode = "stream"
         stream_key = self._resolve_stream_key(stream_key, ma_id)
-        rec = await self._set_active_recognizer(stream_key)
+        rec = await self._ensure_recognizer(key, stream_key)
         result = rec.current if rec else None
         if result is None:
             self._log_mode(runtime, name, "stream", None,
@@ -753,14 +850,27 @@ def create_app(controller: Controller) -> Quart:
     async def players():
         return jsonify(controller.list_players())
 
+    @app.before_serving
+    async def _start_engine():
+        controller.start_supervisor()
+
+    @app.after_serving
+    async def _stop_engine():
+        await controller.stop_supervisor()
+
     @app.route("/current-track")
     async def current_track():
-        return jsonify(await controller.current_track(request.args.get("player")))
+        # Renew the engine lease and return what the supervisor last computed —
+        # the HTTP layer no longer drives recognition itself.
+        player = request.args.get("player")
+        controller.touch_lease(player)
+        return jsonify(controller.track_snapshot(player))
 
     @app.route("/lyrics")
     async def lyrics_route():
-        return jsonify(await controller.lyrics(
-            request.args.get("player"), request.args.get("provider")))
+        player = request.args.get("player")
+        controller.touch_lease(player)
+        return jsonify(await controller.lyrics(player, request.args.get("provider")))
 
     @app.route("/bad-match", methods=["POST"])
     async def bad_match():

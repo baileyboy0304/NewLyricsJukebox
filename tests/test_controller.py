@@ -83,10 +83,10 @@ def test_rtp_stream_enters_stream_mode_not_stuck_in_queue():
             def get_position(self):
                 return 0.0
 
-        async def _fake_set_active(stream_key):
+        async def _fake_set_active(key, stream_key):
             return _Rec()
 
-        c._set_active_recognizer = _fake_set_active
+        c._ensure_recognizer = _fake_set_active
         track = await c.current_track(None)
         assert track["source"] == "stream"
 
@@ -231,10 +231,10 @@ def test_selected_standalone_player_not_hijacked_to_unrelated_playing_player():
 
         c = Controller(ma=_MA(), capture=_Capture())
 
-        async def _fake_set_active(stream_key):
+        async def _fake_set_active(key, stream_key):
             return _Rec()
 
-        c._set_active_recognizer = _fake_set_active
+        c._ensure_recognizer = _fake_set_active
         track = await c.current_track("4efd289d")
         # Not hijacked: no "Watermelon Sugar", falls through to recognition on the
         # selected stream, keeping the device's own name.
@@ -285,10 +285,10 @@ def test_switching_spotify_connect_to_radio_uses_recognition_not_stale_connect()
             def get_position(self):
                 return 0.0
 
-        async def fake_set_active(stream_key):
+        async def fake_set_active(key, stream_key):
             return _Rec()
 
-        c._set_active_recognizer = fake_set_active
+        c._ensure_recognizer = fake_set_active
         track = await c.current_track("4efd289d")
         assert track["source"] == "stream"
         assert track["title"] != "I Won't Let The Sun Go Down"  # not the stale Connect track
@@ -326,10 +326,10 @@ def test_radio_uses_recognition_not_ma_station_name():
             def get_position(self):
                 return 0.0
 
-        async def fake_set_active(stream_key):
+        async def fake_set_active(key, stream_key):
             return _Rec()
 
-        c._set_active_recognizer = fake_set_active
+        c._ensure_recognizer = fake_set_active
         track = await c.current_track(None)
         assert track["source"] == "stream"
         assert track["title"] != "Smooth Radio (London, UK)"
@@ -391,10 +391,10 @@ def test_spotify_connect_to_radio_stale_key_recovers_to_recognition():
             def get_position(self):
                 return 0.0
 
-        async def fake_set_active(stream_key):
+        async def fake_set_active(key, stream_key):
             return _Rec()
 
-        c._set_active_recognizer = fake_set_active
+        c._ensure_recognizer = fake_set_active
         track = await c.current_track("73d34824")   # stale selected SSRC
         assert track["source"] == "stream"
         assert track["title"] != "The Best of My Love"   # not the stale Connect track
@@ -609,31 +609,88 @@ def test_list_players_keeps_distinct_devices_separate():
     assert len(out["players"]) == 2
 
 
-def test_only_one_recognizer_runs_at_a_time():
-    """Switching streams must stop the previous recognizer (no pile-up that
-    bombards Shazam in parallel)."""
+def test_recognizer_is_per_player_and_rebinds_on_stream_change():
+    """Each player gets its own recognizer (several mics can recognize at once),
+    and a player's recognizer rebinds when its stream changes (new SSRC)."""
     class _Cap:
         async def get_audio(self, duration, key, should_continue=None):
             return None  # keep recognizers idle/cheap
 
     async def scenario():
         c = Controller(ma=None, capture=_Cap())
-        await c._set_active_recognizer("aaaa")
-        assert set(c.recognizers) == {"aaaa"}
-        await c._set_active_recognizer("bbbb")
-        assert set(c.recognizers) == {"bbbb"}      # aaaa stopped
+        await c._ensure_recognizer("p1", "aaaa")
+        await c._ensure_recognizer("p2", "bbbb")
+        assert set(c.recognizers) == {"p1", "p2"}      # both run in parallel
+        assert c.recognizers["p1"][1] == "aaaa"
+        await c._ensure_recognizer("p1", "cccc")       # p1's stream changed
+        assert c.recognizers["p1"][1] == "cccc"
+        assert set(c.recognizers) == {"p1", "p2"}      # p2 untouched
+        await c._stop_recognizer("p1")
+        assert set(c.recognizers) == {"p2"}
         await c._stop_all_recognizers()
         assert c.recognizers == {}
 
     asyncio.run(scenario())
 
 
-def test_concurrent_swaps_never_leave_two_recognizers():
-    """Regression: the browser polls current-track ~10x/s, so
-    _set_active_recognizer races itself. Without serialization a concurrent poll
-    could create a recognizer in the window where another is mid-stop, leaving two
-    running for one player (the duplicate recognition/lyrics bug). Many overlapping
-    swaps must still collapse to exactly one recognizer."""
+def test_supervisor_runs_only_leased_active_players_and_drops_expired():
+    """The supervisor ticks the pipeline for every leased + active player and
+    forgets expired leases (so the engine follows watchers, not HTTP polls)."""
+    async def scenario():
+        c = Controller(ma=None, capture=_Capture())
+        calls = []
+
+        async def fake_ct(key):
+            calls.append(key)
+
+        c.current_track = fake_ct
+        c._player_active = lambda k: True
+        c.leases = {"a": time.time() + 10, "b": time.time() + 10,
+                    "old": time.time() - 1}
+        await c.supervise_once()
+        assert set(calls) == {"a", "b"}     # expired 'old' never ticked
+        assert "old" not in c.leases
+
+    asyncio.run(scenario())
+
+
+def test_supervisor_tears_down_recognizer_when_unwatched():
+    """A recognizer is stopped once nothing leases its player (display slept /
+    tab closed), instead of lingering forever."""
+    class _Cap:
+        async def get_audio(self, duration, key, should_continue=None):
+            return None
+
+    async def scenario():
+        c = Controller(ma=None, capture=_Cap())
+
+        async def noop(key):
+            pass
+
+        c.current_track = noop
+        await c._ensure_recognizer("p1", "aaaa")
+        assert "p1" in c.recognizers
+        await c.supervise_once()            # no lease for p1
+        assert "p1" not in c.recognizers
+
+    asyncio.run(scenario())
+
+
+def test_track_snapshot_is_read_only_and_starts_no_recognition():
+    """The HTTP read path returns last-computed state and never starts a
+    recognizer — only the supervisor drives recognition now."""
+    c = Controller(ma=_MANoPlayers(), capture=_Capture())
+    c.touch_lease("4efd289d")
+    snap = c.track_snapshot("4efd289d")
+    assert snap["title"] is None            # nothing computed yet
+    assert snap["player"] == "respeaker_lyrics"
+    assert c.recognizers == {}              # read path never recognizes
+    assert "4efd289d" in c.leases           # but the lease was renewed
+
+
+def test_concurrent_ensure_never_leaves_two_recognizers_for_one_player():
+    """Concurrent ticks for the same player must collapse to exactly one
+    recognizer (the _rec_lock guards the stop/start window)."""
     class _Cap:
         async def get_audio(self, duration, key, should_continue=None):
             return None  # keep recognizers idle/cheap
@@ -641,7 +698,7 @@ def test_concurrent_swaps_never_leave_two_recognizers():
     async def scenario():
         c = Controller(ma=None, capture=_Cap())
         await asyncio.gather(*[
-            c._set_active_recognizer("aaaa" if i % 2 == 0 else "bbbb")
+            c._ensure_recognizer("p1", "aaaa" if i % 2 == 0 else "bbbb")
             for i in range(24)
         ])
         assert len(c.recognizers) == 1      # never two for one player

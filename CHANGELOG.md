@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.57
+
+- **Lyrics no longer require an open web page — the engine is now lease-driven.**
+  Recognition used to run only while a browser polled `/current-track`, so an
+  ESPHome display couldn't get lyrics on its own. A server-owned **supervisor** now
+  drives the pipeline: any consumer (web page *or* ESPHome display) polling
+  `/current-track` or `/lyrics` renews a short **lease** for that player, and the
+  supervisor runs recognition for every leased player whose stream is active —
+  tearing it down a few seconds after the last poll. The HTTP layer is now a pure
+  reader of computed state.
+  - **Multiple players recognize in parallel:** recognizers are now per-player
+    (keyed by player, not "at most one"), so several mics/displays work at once.
+  - **Self-cleaning:** fixes the lingering recognizer after a tab closes, and two
+    browsers fighting over a single recognizer.
+  - Cost stays bounded: only *watched* + *stream-active* players recognize;
+    metadata-only players (Spotify/Connect/grouped) stay cheap.
+  - Trade-off: a just-woken display sees a brief (~4–6 s) recognition warm-up.
+
 ## 1.0.56
 
 - **An explicitly-selected player is no longer hijacked onto an unrelated speaker.**
