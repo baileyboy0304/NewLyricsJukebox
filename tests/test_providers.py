@@ -261,6 +261,37 @@ def test_isrc_passed_only_to_providers_that_accept_it():
     assert seen.get("lrc") is True
 
 
+def test_concurrent_same_song_fetches_query_providers_once():
+    """Two clients asking for the same song at once must share ONE provider sweep
+    (not hammer every provider twice and trip rate limits). Both still get results."""
+    import asyncio
+    calls = {"n": 0}
+
+    class _Slow:
+        name, priority, enabled = "lrclib", 2, True
+        async def get_lyrics(self, a, t, al=None, d=None):
+            calls["n"] += 1
+            await asyncio.sleep(0.05)        # keep both fetches overlapping
+            return {"lyrics": [(0.0, "l")]}
+
+    svc = service()
+    svc.providers = [_Slow()]
+    svc._by_name = {p.name: p for p in svc.providers}
+    title = f"Coalesce-{uuid.uuid4()}"
+
+    got = []
+
+    async def scenario():
+        a = svc.fetch("A", title, on_update=lambda d: got.append(("a", d)))
+        b = svc.fetch("A", title, on_update=lambda d: got.append(("b", d)))
+        return await asyncio.gather(a, b)
+
+    da, db = asyncio.run(scenario())
+    assert calls["n"] == 1                    # provider queried once, not twice
+    assert da.line_provider == "lrclib" and db.line_provider == "lrclib"
+    assert any(s == "a" for s, _ in got) and any(s == "b" for s, _ in got)
+
+
 def test_musixmatch_derives_line_sync_from_richsync():
     """When Musixmatch has RichSync (word-synced) but no line subtitles, line-sync
     is derived from the per-line RichSync timings (the Madonna 'Cherish' case where
