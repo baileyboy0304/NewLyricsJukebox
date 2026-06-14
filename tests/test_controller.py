@@ -83,7 +83,7 @@ def test_rtp_stream_enters_stream_mode_not_stuck_in_queue():
             def get_position(self):
                 return 0.0
 
-        async def _fake_set_active(key, stream_key):
+        async def _fake_set_active(stream_key):
             return _Rec()
 
         c._ensure_recognizer = _fake_set_active
@@ -231,7 +231,7 @@ def test_selected_standalone_player_not_hijacked_to_unrelated_playing_player():
 
         c = Controller(ma=_MA(), capture=_Capture())
 
-        async def _fake_set_active(key, stream_key):
+        async def _fake_set_active(stream_key):
             return _Rec()
 
         c._ensure_recognizer = _fake_set_active
@@ -285,7 +285,7 @@ def test_switching_spotify_connect_to_radio_uses_recognition_not_stale_connect()
             def get_position(self):
                 return 0.0
 
-        async def fake_set_active(key, stream_key):
+        async def fake_set_active(stream_key):
             return _Rec()
 
         c._ensure_recognizer = fake_set_active
@@ -326,7 +326,7 @@ def test_radio_uses_recognition_not_ma_station_name():
             def get_position(self):
                 return 0.0
 
-        async def fake_set_active(key, stream_key):
+        async def fake_set_active(stream_key):
             return _Rec()
 
         c._ensure_recognizer = fake_set_active
@@ -391,7 +391,7 @@ def test_spotify_connect_to_radio_stale_key_recovers_to_recognition():
             def get_position(self):
                 return 0.0
 
-        async def fake_set_active(key, stream_key):
+        async def fake_set_active(stream_key):
             return _Rec()
 
         c._ensure_recognizer = fake_set_active
@@ -609,24 +609,22 @@ def test_list_players_keeps_distinct_devices_separate():
     assert len(out["players"]) == 2
 
 
-def test_recognizer_is_per_player_and_rebinds_on_stream_change():
-    """Each player gets its own recognizer (several mics can recognize at once),
-    and a player's recognizer rebinds when its stream changes (new SSRC)."""
+def test_recognizer_is_deduped_per_stream():
+    """Distinct streams each get a recognizer (mics recognize in parallel), but
+    several players pointing at the SAME stream share ONE recognizer — they must
+    not each spin up a Shazam loop on the same audio."""
     class _Cap:
         async def get_audio(self, duration, key, should_continue=None):
             return None  # keep recognizers idle/cheap
 
     async def scenario():
         c = Controller(ma=None, capture=_Cap())
-        await c._ensure_recognizer("p1", "aaaa")
-        await c._ensure_recognizer("p2", "bbbb")
-        assert set(c.recognizers) == {"p1", "p2"}      # both run in parallel
-        assert c.recognizers["p1"][1] == "aaaa"
-        await c._ensure_recognizer("p1", "cccc")       # p1's stream changed
-        assert c.recognizers["p1"][1] == "cccc"
-        assert set(c.recognizers) == {"p1", "p2"}      # p2 untouched
-        await c._stop_recognizer("p1")
-        assert set(c.recognizers) == {"p2"}
+        await c._ensure_recognizer("aaaa")
+        await c._ensure_recognizer("aaaa")             # same stream again -> no dup
+        await c._ensure_recognizer("bbbb")
+        assert set(c.recognizers) == {"aaaa", "bbbb"}  # one per distinct stream
+        await c._stop_stream_recognizer("aaaa")
+        assert set(c.recognizers) == {"bbbb"}
         await c._stop_all_recognizers()
         assert c.recognizers == {}
 
@@ -655,8 +653,8 @@ def test_supervisor_runs_only_leased_active_players_and_drops_expired():
 
 
 def test_supervisor_tears_down_recognizer_when_unwatched():
-    """A recognizer is stopped once nothing leases its player (display slept /
-    tab closed), instead of lingering forever."""
+    """A stream's recognizer is stopped once no leased player is recognizing on it
+    (display slept / tab closed), instead of lingering forever."""
     class _Cap:
         async def get_audio(self, duration, key, should_continue=None):
             return None
@@ -668,10 +666,36 @@ def test_supervisor_tears_down_recognizer_when_unwatched():
             pass
 
         c.current_track = noop
-        await c._ensure_recognizer("p1", "aaaa")
-        assert "p1" in c.recognizers
-        await c.supervise_once()            # no lease for p1
-        assert "p1" not in c.recognizers
+        await c._ensure_recognizer("aaaa")
+        assert "aaaa" in c.recognizers
+        await c.supervise_once()            # no lease -> no wanted stream
+        assert "aaaa" not in c.recognizers
+
+    asyncio.run(scenario())
+
+
+def test_supervisor_shares_one_recognizer_across_players_on_same_stream():
+    """Two leased players resolving to the same stream must end up sharing ONE
+    recognizer, not one each (the duplicate-id pile-up seen on real devices)."""
+    class _Cap:
+        async def get_audio(self, duration, key, should_continue=None):
+            return None
+
+    async def scenario():
+        c = Controller(ma=None, capture=_Cap())
+        c._player_active = lambda k: True
+
+        async def fake_ct(key):
+            # Both players recognize on the same physical stream "shared".
+            rt = c.runtimes.setdefault(key, PlayerRuntime(key=key))
+            rt.rec_stream = "shared"
+            await c._ensure_recognizer("shared")
+
+        c.current_track = fake_ct
+        c.leases = {"web": time.time() + 10, "esp32": time.time() + 10}
+        await c.supervise_once()
+        assert set(c.recognizers) == {"shared"}     # one recognizer, not two
+        await c._stop_all_recognizers()
 
     asyncio.run(scenario())
 
@@ -688,9 +712,9 @@ def test_track_snapshot_is_read_only_and_starts_no_recognition():
     assert "4efd289d" in c.leases           # but the lease was renewed
 
 
-def test_concurrent_ensure_never_leaves_two_recognizers_for_one_player():
-    """Concurrent ticks for the same player must collapse to exactly one
-    recognizer (the _rec_lock guards the stop/start window)."""
+def test_concurrent_ensure_never_leaves_two_recognizers_for_one_stream():
+    """Concurrent ticks for the same stream must collapse to exactly one
+    recognizer (the _rec_lock guards the create window)."""
     class _Cap:
         async def get_audio(self, duration, key, should_continue=None):
             return None  # keep recognizers idle/cheap
@@ -698,10 +722,9 @@ def test_concurrent_ensure_never_leaves_two_recognizers_for_one_player():
     async def scenario():
         c = Controller(ma=None, capture=_Cap())
         await asyncio.gather(*[
-            c._ensure_recognizer("p1", "aaaa" if i % 2 == 0 else "bbbb")
-            for i in range(24)
+            c._ensure_recognizer("aaaa") for _ in range(24)
         ])
-        assert len(c.recognizers) == 1      # never two for one player
+        assert len(c.recognizers) == 1      # never two for one stream
         await c._stop_all_recognizers()
         assert c.recognizers == {}
 

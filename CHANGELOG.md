@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.58
+
+- **Fix slow recognition start: one recognizer per *stream*, not per *player*.**
+  1.0.57 keyed recognizers by player, so several ids that resolve to the same
+  device (a configured name + stale SSRCs from earlier reconnects + the live
+  stream) each spun up their own Shazam loop on the *same* audio — tripling the
+  recognition load and making the first lock take far longer (repeated `timed out
+  after 10s`). Recognizers are now deduped by stream: many players pointing at one
+  RTP stream share a single recognizer, while genuinely distinct mics still
+  recognize in parallel. The supervisor keeps only the streams a leased player is
+  actually recognizing on (`PlayerRuntime.rec_stream`) and tears down the rest.
+
 ## 1.0.57
 
 - **Lyrics no longer require an open web page — the engine is now lease-driven.**
