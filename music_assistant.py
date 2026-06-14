@@ -114,6 +114,48 @@ class MusicAssistant:
                 return player.player_id
         return None
 
+    def players_related(self, a_id: Optional[str], b_id: Optional[str]) -> bool:
+        """True if two MA players are the same, or grouped / synced together.
+
+        Used to decide whether one player's now-playing metadata legitimately
+        describes another player's audio (a speaker that's part of the group whose
+        coordinator holds the track). A standalone player — e.g. a mic that has
+        nothing to do with whatever else is playing — is NOT related, so we must
+        not borrow an unrelated player's track for it."""
+        if not a_id or not b_id:
+            return False
+        if a_id == b_id:
+            return True
+        if not self._client:
+            return False
+
+        def obj(pid):
+            try:
+                return self._client.players.get(pid)
+            except Exception:  # noqa: BLE001
+                return None
+
+        pa, pb = obj(a_id), obj(b_id)
+
+        def childs(p):
+            return set(getattr(p, "group_childs", None) or [])
+
+        # b is a member of a's group (or vice-versa), or one is synced to / shares
+        # an active group with the other.
+        if pa is not None:
+            if b_id in childs(pa) or getattr(pa, "synced_to", None) == b_id \
+                    or getattr(pa, "active_group", None) == b_id:
+                return True
+        if pb is not None:
+            if a_id in childs(pb) or getattr(pb, "synced_to", None) == a_id \
+                    or getattr(pb, "active_group", None) == a_id:
+                return True
+        if pa is not None and pb is not None:
+            ga = getattr(pa, "active_group", None)
+            if ga and ga == getattr(pb, "active_group", None):
+                return True
+        return False
+
     async def get_player_state(self, player_id: str) -> Optional[PlayerState]:
         if not self._client:
             return None

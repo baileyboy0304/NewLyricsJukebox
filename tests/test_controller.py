@@ -171,6 +171,11 @@ def test_selected_player_follows_playing_spotify_connect_player():
             def find_playing_player_id(self):
                 return "coordinator"   # a different player holds the Connect track
 
+            def players_related(self, a, b):
+                # The respeaker IS grouped with the coordinator (it's the speaker
+                # playing the Connect audio), so following its metadata is valid.
+                return {a, b} == {"a0505ec6", "coordinator"}
+
             async def get_player_state(self, pid):
                 if pid == "coordinator":
                     return PlayerState(
@@ -185,6 +190,57 @@ def test_selected_player_follows_playing_spotify_connect_player():
         assert track["title"] == "Candy"
         assert track["from_ma"] is True
         assert track["source"] == "stream"
+        assert track["player"] == "respeaker_lyrics"   # keeps the capture device name
+
+    asyncio.run(scenario())
+
+
+def test_selected_standalone_player_not_hijacked_to_unrelated_playing_player():
+    """A selected standalone device (e.g. a mic) must NOT borrow the metadata of an
+    unrelated MA player that happens to be playing. It should recognize its own
+    audio instead of showing the other player's track/name."""
+    from ma_models import PlayerState
+
+    async def scenario():
+        class _MA:
+            connected = True
+            preferred_player_id = None
+
+            def list_players(self):
+                return [{"player_id": "a0505ec6", "name": "Respeaker"}]
+
+            def find_playing_player_id(self):
+                return "cellar"   # a totally separate speaker is playing
+
+            def players_related(self, a, b):
+                return False       # the mic has nothing to do with it
+
+            async def get_player_state(self, pid):
+                if pid == "cellar":
+                    return PlayerState(player_id="cellar", name="Cellar Speaker",
+                                       state="playing", title="Watermelon Sugar",
+                                       artist="Harry Styles")
+                return None        # the selected mic's player has no track
+
+        class _Rec:
+            current = None
+            is_playing = False
+
+            def get_position(self):
+                return 0.0
+
+        c = Controller(ma=_MA(), capture=_Capture())
+
+        async def _fake_set_active(stream_key):
+            return _Rec()
+
+        c._set_active_recognizer = _fake_set_active
+        track = await c.current_track("4efd289d")
+        # Not hijacked: no "Watermelon Sugar", falls through to recognition on the
+        # selected stream, keeping the device's own name.
+        assert track["title"] != "Watermelon Sugar"
+        assert track["source"] == "stream"
+        assert track["player"] == "respeaker_lyrics"
 
     asyncio.run(scenario())
 

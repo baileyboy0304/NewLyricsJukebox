@@ -297,6 +297,9 @@ class Controller:
         key, ma_id, stream_key, name = self._resolve(param)
         name = self._friendly_name(key, name)
         runtime = self.runtimes.setdefault(key, PlayerRuntime(key=key))
+        # An explicit pick (not Auto) must be honoured: we don't silently migrate
+        # it to another live stream, nor borrow an unrelated player's metadata.
+        is_auto = not param or param == "auto"
 
         state: Optional[PlayerState] = None
         if self.ma and self.ma.connected and ma_id:
@@ -308,7 +311,11 @@ class Controller:
         # delivering our audio now, so we classify the CURRENT source (radio vs
         # Spotify Connect) instead of a ghost id — otherwise a switch to radio
         # gets stuck behind a lingering "still playing" Connect player (1b below).
-        if state is None and self.capture:
+        sel_stream = self.capture.get_stream(stream_key) if (self.capture and stream_key) else None
+        sel_live = sel_stream is not None and getattr(sel_stream, "active", True)
+        # Skip the migration when an explicitly-selected stream is still live —
+        # only Auto (or a dead/stale selected stream) re-points to another stream.
+        if state is None and self.capture and not (not is_auto and sel_live):
             live = self.capture.first_active_stream()
             if live is not None and live.ma_player_id and live.ma_player_id != ma_id:
                 ma_id, stream_key = live.ma_player_id, live.key
@@ -351,10 +358,16 @@ class Controller:
         resolved_is_radio = state is not None and self._is_radio(state)
         if self.ma and self.ma.connected and not resolved_is_radio:
             playing_id = self.ma.find_playing_player_id()
-            if playing_id and playing_id != ma_id:
+            # Only follow another player's metadata if it's Auto, or the playing
+            # player is the SAME as / grouped with the one we resolved to. A
+            # standalone selected device (e.g. a mic unrelated to whatever else is
+            # playing) must not be hijacked onto it.
+            if (playing_id and playing_id != ma_id
+                    and (is_auto or self.ma.players_related(ma_id, playing_id))):
                 state2 = await self.ma.get_player_state(playing_id)
                 if state2 is not None and state2.title and not self._is_radio(state2):
-                    track = self._ma_track(state2, state2.name or name)
+                    # Keep the selected capture device's name; borrow only the track.
+                    track = self._ma_track(state2, name)
                     runtime.mode = track["source"]
                     runtime.track = track
                     await self._stop_all_recognizers()
