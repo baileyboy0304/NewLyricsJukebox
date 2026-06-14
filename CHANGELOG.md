@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.56
+
+- **An explicitly-selected player is no longer hijacked onto an unrelated speaker.**
+  Selecting a standalone device (e.g. the Atom Echo mic) immediately bounced to
+  whatever else Music Assistant was playing (e.g. "Cellar Speaker"), and the name
+  shown was that other player's. The "follow the player actually playing" step —
+  needed for grouped / Spotify-Connect setups — now only follows when it's Auto, or
+  when the playing player is the **same as, or grouped/synced with**, the one you
+  selected (new `players_related()` check). A standalone pick now recognizes its own
+  audio. The displayed name also stays the **selected capture device** rather than
+  the borrowed coordinator. An explicitly-selected, still-live stream is likewise no
+  longer silently migrated to another stream.
+
 ## 1.0.55
 
 - **Blank lyric lines no longer blank the display.** Providers include timestamped
