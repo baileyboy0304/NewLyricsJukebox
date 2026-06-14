@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.59
+
+- **Fix lyric "shudder" introduced by the lease engine (1.0.57).** The supervisor
+  recomputes a player's position only ~once/second, but the browser polls ~10x/s and
+  re-anchors its flywheel on every poll — so it kept getting yanked back to the stale
+  per-second position, jittering the active lyric line back and forth. `/current-track`
+  now reports a **live position**, extrapolated from when it was computed
+  (`PlayerRuntime.position_at`), so each poll sees a smoothly-advancing value (as the
+  old per-poll recompute did). Paused tracks are not extrapolated.
+
 ## 1.0.58
 
 - **Fix slow recognition start: one recognizer per *stream*, not per *player*.**
