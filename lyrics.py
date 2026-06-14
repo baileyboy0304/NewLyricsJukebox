@@ -125,6 +125,12 @@ class LyricsService:
             key=lambda p: p.priority,
         )
         self._by_name = {p.name: p for p in self.providers}
+        # In-flight provider sweeps keyed by "artist|title". Multiple clients on the
+        # same player (a phone + an ESP32 display, or duplicate/stale ids) each ask
+        # for the same song at once; without this they'd hit every provider in
+        # parallel, doubling load and tripping rate limits (Musixmatch captcha,
+        # LRCLib timeouts) — which delayed lyrics for the second client.
+        self._inflight: Dict[str, dict] = {}
 
     # -- DB ---------------------------------------------------------------- #
 
@@ -443,6 +449,34 @@ class LyricsService:
                 on_update(data)
             return data
 
+        # Coalesce concurrent fetches of the SAME song so providers aren't queried
+        # once per client. A rescue (force) or cleaned-search uses a different query,
+        # so it never shares an in-flight sweep.
+        shareable = not force and not search_artist and not search_title
+        key = f"{artist}|{title}"
+        if shareable and key in self._inflight:
+            entry = self._inflight[key]
+            if on_update:
+                entry["subscribers"].append(on_update)
+                if entry["data"] is not None:
+                    on_update(entry["data"])     # catch the late joiner up
+            return await asyncio.shield(entry["task"])
+
+        entry = {"subscribers": [on_update] if on_update else [], "data": None,
+                 "task": None}
+        task = asyncio.ensure_future(self._sweep(
+            artist, title, album, duration, spotify_id,
+            search_artist, search_title, force, isrc, entry))
+        entry["task"] = task
+        if shareable:
+            self._inflight[key] = entry
+            task.add_done_callback(lambda _t, k=key: self._inflight.pop(k, None))
+        return await asyncio.shield(task)
+
+    async def _sweep(self, artist, title, album, duration, spotify_id,
+                     search_artist, search_title, force, isrc, entry) -> LyricsData:
+        """The actual provider sweep behind ``fetch``. Fans incremental results out
+        to every subscriber sharing this song's in-flight fetch."""
         sa = search_artist or artist
         st = search_title or title
         if force:
@@ -464,8 +498,12 @@ class LyricsService:
             db = self._read_db(artist, title) or {
                 "saved_lyrics": {}, "word_synced_lyrics": {}, "metadata": {}}
             data = self._select(artist, title, db)
-            if on_update:
-                on_update(data)
+            entry["data"] = data
+            for cb in list(entry["subscribers"]):
+                try:
+                    cb(data)
+                except Exception:  # noqa: BLE001 - one client's callback must not break others
+                    logger.exception("lyrics on_update callback failed")
 
         if FEATURES["parallel_provider_fetch"]:
             # Each task returns (provider, raw) so we don't rely on identifying

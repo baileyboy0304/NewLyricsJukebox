@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.60
+
+- **Faster lyrics with multiple clients: coalesce concurrent fetches for the same
+  song.** When two clients watch one player (a phone + an ESP32 display, or
+  duplicate/stale player ids), each runtime fetched lyrics independently — querying
+  every provider twice in parallel, which tripped rate limits (Musixmatch captcha,
+  LRCLib timeouts) and delayed lyrics for the second client by 10–15 s even though
+  the first already had them. Same-song fetches now share a single provider sweep:
+  the first triggers it, later ones subscribe and receive the same incremental
+  results. Rescue/cleaned-search (bad-match) fetches use a different query and are
+  never shared.
+
 ## 1.0.59
 
 - **Fix lyric "shudder" introduced by the lease engine (1.0.57).** The supervisor
