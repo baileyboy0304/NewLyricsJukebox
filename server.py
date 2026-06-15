@@ -48,7 +48,6 @@ class PlayerRuntime:
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
     log_assoc: Optional[str] = None   # last source-association state we logged
-    log_diag: Optional[str] = None    # last ct-enter diagnostic line
 
 
 class Controller:
@@ -308,13 +307,32 @@ class Controller:
     # considered offline within the same window.
     SOURCE_META_TTL = 6.0
 
-    def _canonical_meta_key(self, key: str) -> str:
-        """Map a player key to a stable id that survives SSRC churn AND is
-        identical for the bridge's name-based polls and the browser's
-        SSRC-based polls. Both resolve to the same MA player id when the mic
-        is registered with MA; fall back to the literal key otherwise."""
-        _k, ma_id, _sk, _n = self._resolve(key)
-        return ma_id or key
+    def _meta_aliases(self, key: str) -> set:
+        """Return every id that could legitimately point at the same physical
+        device as ``key``. MA can expose one device under multiple player ids
+        (e.g. a sendspin slug ``waveshare-mic-e20b1c`` AND a MAC-address
+        wrapper ``30:ED:A0:E2:0B:1C`` for the same mic), so we store and look
+        up source_meta under all of them: the literal key, the resolved MA id,
+        the friendly name, and any active RTP stream whose name or
+        ma_player_id agrees with what we resolved."""
+        _k, ma_id, stream_key, name_resolved = self._resolve(key)
+        name = self._friendly_name(_k, name_resolved)
+        aliases = {key, name}
+        if ma_id:
+            aliases.add(ma_id)
+        if stream_key:
+            aliases.add(stream_key)
+        if self.capture:
+            for s in self.capture.list_streams():
+                sname = s.get("name") or ""
+                sma = s.get("ma_player_id")
+                if (sname and sname == name) or (sma and sma == ma_id):
+                    aliases.add(s["key"])
+                    if sma:
+                        aliases.add(sma)
+                    if sname:
+                        aliases.add(sname)
+        return {a for a in aliases if a}
 
     def set_source_metadata(self, key: str, args) -> None:
         """Receive direct now-playing metadata from the bridge (Cast / HA
@@ -326,10 +344,11 @@ class Controller:
         handles eventual cleanup."""
         if "source_title" not in args:
             return
-        cid = self._canonical_meta_key(key)
+        aliases = self._meta_aliases(key)
         title = (args.get("source_title") or "").strip()
         if not title:
-            self.source_meta.pop(cid, None)
+            for a in aliases:
+                self.source_meta.pop(a, None)
             return
         try:
             pos = float(args.get("source_position") or 0.0)
@@ -353,9 +372,11 @@ class Controller:
             "seekable": False,
         }
         track["track_id"] = f"{track['artist']}|{track['title']}"
-        self.source_meta[cid] = (time.time(), track)
-        logger.info("set-source-meta key=%r cid=%r title=%r (have=%r)",
-                    key, cid, title, sorted(self.source_meta.keys()))
+        entry = (time.time(), track)
+        for a in aliases:
+            self.source_meta[a] = entry
+        logger.info("set-source-meta key=%r aliases=%r title=%r",
+                    key, sorted(aliases), title)
 
     def set_source_player(self, key: str, source_player: Optional[str]) -> None:
         """Associate a player (a mic) with the MA player whose audio it's hearing
@@ -479,29 +500,35 @@ class Controller:
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         return track
 
-    def _try_source_meta(self, runtime, ma_id, key, name, tag=" (source-meta)"):
-        """Return a fresh track dict if the bridge has pushed metadata for this
-        device, else None. Looked up by canonical id (MA player id when
-        available) so the bridge's name-based polls and the browser's
-        SSRC-based polls hit the same entry."""
-        cid = ma_id or key
-        meta = self.source_meta.get(cid)
-        if meta is None:
-            logger.info("source-meta MISS cid=%r (have=%r)", cid,
-                        sorted(self.source_meta.keys()))
-            return None
-        age = time.time() - meta[0]
-        if age > self.SOURCE_META_TTL:
-            logger.info("source-meta STALE cid=%r age=%.2fs", cid, age)
-            return None
-        logger.info("source-meta HIT cid=%r age=%.2fs title=%r", cid, age, meta[1].get("title"))
-        track = {**meta[1], "player": name}
-        runtime.mode = "stream"
-        runtime.track = track
-        runtime.position_at = time.time()
-        runtime.rec_stream = None
-        self._log_mode(runtime, name, "stream", track["title"], tag)
-        return track
+    def _try_source_meta(self, runtime, ma_id, key, name,
+                         stream_key=None, tag=" (source-meta)"):
+        """Return a fresh track dict if the bridge has pushed metadata for
+        this device under ANY alias that matches a candidate id for the
+        current poll. We try ma_id, key, name, and stream_key — MA can
+        expose a single device under multiple player ids (e.g. a sendspin
+        slug plus a MAC-address wrapper), so we have to look across all of
+        them rather than rely on one canonical key."""
+        candidates = []
+        seen = set()
+        for cid in (ma_id, key, name, stream_key):
+            if cid and cid not in seen:
+                seen.add(cid)
+                candidates.append(cid)
+        for cid in candidates:
+            meta = self.source_meta.get(cid)
+            if meta is None:
+                continue
+            age = time.time() - meta[0]
+            if age > self.SOURCE_META_TTL:
+                continue
+            track = {**meta[1], "player": name}
+            runtime.mode = "stream"
+            runtime.track = track
+            runtime.position_at = time.time()
+            runtime.rec_stream = None
+            self._log_mode(runtime, name, "stream", track["title"], tag)
+            return track
+        return None
 
     async def current_track(self, param: Optional[str]) -> dict:
         key, ma_id, stream_key, name = self._resolve(param)
@@ -510,15 +537,6 @@ class Controller:
         # An explicit pick (not Auto) must be honoured: we don't silently migrate
         # it to another live stream, nor borrow an unrelated player's metadata.
         is_auto = not param or param == "auto"
-        # Diagnostic: dump everything that matters for the source_meta / step-0a
-        # decision. Deduped per (param, ma_id, source_meta keys) so we get one
-        # line per state change, not per supervisor tick.
-        sm_keys = sorted(self.source_meta.keys())
-        diag = "param=%r key=%r ma_id=%r stream_key=%r sm_keys=%r" % (
-            param, key, ma_id, stream_key, sm_keys)
-        if runtime.log_diag != diag:
-            runtime.log_diag = diag
-            logger.info("ct-enter %s", diag)
 
         # 0a) DIRECT SOURCE METADATA (from the bridge, NLJ ≥ 1.0.64). The bridge
         #     reads the speaker's HA media_player attrs (Cast / Sonos / AirPlay /
@@ -526,7 +544,8 @@ class Controller:
         #     — no MA round-trip and no player-id resolution. Radio is signalled
         #     by absence (the bridge omits source_title when content_type=radio),
         #     so a missing entry naturally falls through to recognition.
-        track = self._try_source_meta(runtime, ma_id, key, name)
+        track = self._try_source_meta(runtime, ma_id, key, name,
+                                      stream_key=stream_key)
         if track is not None:
             return track
 
@@ -576,14 +595,9 @@ class Controller:
         # only Auto (or a dead/stale selected stream) re-points to another stream.
         if state is None and self.capture and not (not is_auto and sel_live):
             live = self.capture.first_active_stream()
-            logger.info("ct-migrate-check key=%r ma_id=%r live=%r live_ma=%r",
-                        key, ma_id,
-                        getattr(live, "key", None) if live else None,
-                        getattr(live, "ma_player_id", None) if live else None)
             if live is not None and live.ma_player_id and live.ma_player_id != ma_id:
                 ma_id, stream_key = live.ma_player_id, live.key
                 name = self._friendly_name(live.key, live.name)
-                logger.info("ct-migrated key=%r -> ma_id=%r stream_key=%r", key, ma_id, stream_key)
                 # Re-check source_meta with the migrated ma_id: a stale-SSRC
                 # poll (browser holding an old SSRC after NLJ restart) maps
                 # to the canonical mic id only after this migration, so step
@@ -591,6 +605,7 @@ class Controller:
                 # re-check we'd fall through to step 3 and start recognition
                 # for a device the bridge is already feeding metadata for.
                 track = self._try_source_meta(runtime, ma_id, key, name,
+                                              stream_key=stream_key,
                                               tag=" (source-meta after migrate)")
                 if track is not None:
                     return track
