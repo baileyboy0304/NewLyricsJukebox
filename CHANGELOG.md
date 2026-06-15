@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.66
+
+- **Fix: bridge and browser polls keyed `source_meta` differently for the
+  same device.** The bridge polls `?player=Waveshare Mic e20b1c` (key =
+  device name) and the browser polls `?player=<SSRC>` when it picks a
+  detected stream — different keys, same device. The bridge stored
+  metadata under the name key; the browser's supervisor tick looked it up
+  under the SSRC key and missed → step 3 → recognizer started one second
+  after a successful `(source-meta)` hit. Observed in the user's 1.0.65
+  log at t=0.377 (source-meta) → t=0.379 (recognizing). Now keyed by the
+  MA player id when present (stable across SSRC churn and identical for
+  both poll styles), with literal-key fallback for non-MA setups.
+
 ## 1.0.65
 
 - **Fix: browser polls were clearing the bridge's source metadata.** The
