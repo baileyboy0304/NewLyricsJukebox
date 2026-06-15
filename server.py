@@ -307,6 +307,14 @@ class Controller:
     # considered offline within the same window.
     SOURCE_META_TTL = 6.0
 
+    def _canonical_meta_key(self, key: str) -> str:
+        """Map a player key to a stable id that survives SSRC churn AND is
+        identical for the bridge's name-based polls and the browser's
+        SSRC-based polls. Both resolve to the same MA player id when the mic
+        is registered with MA; fall back to the literal key otherwise."""
+        _k, ma_id, _sk, _n = self._resolve(key)
+        return ma_id or key
+
     def set_source_metadata(self, key: str, args) -> None:
         """Receive direct now-playing metadata from the bridge (Cast / HA
         media_player attrs forwarded straight through). Only acts when the
@@ -317,9 +325,10 @@ class Controller:
         handles eventual cleanup."""
         if "source_title" not in args:
             return
+        cid = self._canonical_meta_key(key)
         title = (args.get("source_title") or "").strip()
         if not title:
-            self.source_meta.pop(key, None)
+            self.source_meta.pop(cid, None)
             return
         try:
             pos = float(args.get("source_position") or 0.0)
@@ -343,7 +352,7 @@ class Controller:
             "seekable": False,
         }
         track["track_id"] = f"{track['artist']}|{track['title']}"
-        self.source_meta[key] = (time.time(), track)
+        self.source_meta[cid] = (time.time(), track)
 
     def set_source_player(self, key: str, source_player: Optional[str]) -> None:
         """Associate a player (a mic) with the MA player whose audio it's hearing
@@ -481,7 +490,10 @@ class Controller:
         #     — no MA round-trip and no player-id resolution. Radio is signalled
         #     by absence (the bridge omits source_title when content_type=radio),
         #     so a missing entry naturally falls through to recognition.
-        meta = self.source_meta.get(key)
+        # Look up by canonical id (MA player id when available) so a browser
+        # poll using the SSRC key finds the entry the bridge stored under the
+        # device name — both resolve to the same MA player id.
+        meta = self.source_meta.get(ma_id or key)
         if meta is not None and (time.time() - meta[0]) <= self.SOURCE_META_TTL:
             track = {**meta[1], "player": name}
             runtime.mode = "stream"
