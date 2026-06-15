@@ -195,6 +195,93 @@ def test_selected_player_follows_playing_spotify_connect_player():
     asyncio.run(scenario())
 
 
+def test_associated_source_player_uses_speaker_metadata_no_recognition():
+    """With an explicit mic->speaker association (from the bridge), a mic uses the
+    speaker's now-playing metadata directly — no recognition — while keeping its
+    own display name."""
+    from ma_models import PlayerState
+
+    async def scenario():
+        class _MA:
+            connected = True
+            preferred_player_id = None
+
+            def list_players(self):
+                return [{"player_id": "a0505ec6", "name": "Waveshare"}]
+
+            def find_playing_player_id(self):
+                return None
+
+            def players_related(self, a, b):
+                return False
+
+            async def get_player_state(self, pid):
+                if pid == "move2":
+                    return PlayerState(player_id="move2", name="Move 2", state="playing",
+                                       title="Hey Jude", artist="The Beatles",
+                                       active_source_name="Spotify Connect")
+                return None   # the mic itself has no track
+
+        c = Controller(ma=_MA(), capture=_Capture())
+        key = c.touch_lease("4efd289d")
+        c.set_source_player(key, "move2")
+        track = await c.current_track("4efd289d")
+        assert track["title"] == "Hey Jude"
+        assert track["from_ma"] is True
+        assert track["player"] == "respeaker_lyrics"   # keeps the mic's name
+        assert c.recognizers == {}                       # no recognition started
+        assert c._player_active("4efd289d") is True      # desired even if mic idle
+
+    asyncio.run(scenario())
+
+
+def test_associated_source_on_radio_falls_back_to_recognition():
+    """When the associated speaker is on radio (MA has only the station name), the
+    mic must recognise its own audio rather than show the station."""
+    from ma_models import PlayerState
+
+    async def scenario():
+        class _MA:
+            connected = True
+            preferred_player_id = None
+
+            def list_players(self):
+                return [{"player_id": "a0505ec6", "name": "Waveshare"}]
+
+            def find_playing_player_id(self):
+                return None
+
+            def players_related(self, a, b):
+                return False
+
+            async def get_player_state(self, pid):
+                if pid == "move2":
+                    return PlayerState(player_id="move2", name="Move 2", state="playing",
+                                       title="Smooth Radio", media_type="radio")
+                return None
+
+        class _Rec:
+            current = None
+            is_playing = False
+
+            def get_position(self):
+                return 0.0
+
+        c = Controller(ma=_MA(), capture=_Capture())
+
+        async def fake_ensure(stream_key):
+            return _Rec()
+
+        c._ensure_recognizer = fake_ensure
+        key = c.touch_lease("4efd289d")
+        c.set_source_player(key, "move2")
+        track = await c.current_track("4efd289d")
+        assert track["title"] != "Smooth Radio"   # not borrowed; recognising the mic
+        assert track["source"] == "stream"
+
+    asyncio.run(scenario())
+
+
 def test_selected_standalone_player_not_hijacked_to_unrelated_playing_player():
     """A selected standalone device (e.g. a mic) must NOT borrow the metadata of an
     unrelated MA player that happens to be playing. It should recognize its own

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.62
+
+- **Mic ↔ speaker association: use the speaker's metadata instead of recognising.**
+  A microphone listening to a Spotify Connect / Spotify / Apple Music / local-queue
+  speaker now shows that speaker's now-playing **directly from Music Assistant** —
+  instant, no Shazam, no ACRCloud — when the consumer tells NLJ which speaker the
+  mic is hearing. Pass `source_player=<MA player id>` alongside `player=` on
+  `/current-track` and `/lyrics`; NLJ reads that player's metadata for the mic
+  (keeping the mic's own display name). When the speaker is on **radio** (MA has
+  only the station name) or has no metadata, it falls back to **recognising the
+  mic's audio** as before. This is opt-in per device — players without an
+  association are unaffected (still governed by the grouping check from 1.0.56), so
+  there's no risk of a mic being hijacked onto an unrelated speaker.
+
 ## 1.0.61
 
 - **Context-aware lyric blanking — fewer false fades on microphone input.** A single
