@@ -190,8 +190,14 @@ class PlayerRecognizer:
         self._acr_tolerance = AUDIO_RECOGNITION["acr_priority_tolerance"]
         self._acr_anchored = False   # is the current track's position ACR-locked?
         # Clear the held track after this many consecutive no-matches so the UI
-        # can fade the metadata away between songs (default 1 = immediate).
-        self._blank_after = max(1, AUDIO_RECOGNITION.get("blank_after_failures", 1))
+        # can fade the metadata away between songs. Context-aware: fewer failures
+        # needed near a song's end (it probably really ended), more mid-song (a
+        # single miss there is usually a transient quiet passage / mic gap).
+        self._blank_after = max(1, AUDIO_RECOGNITION.get("blank_after_failures", 3))
+        self._blank_after_near_end = max(
+            1, AUDIO_RECOGNITION.get("blank_after_failures_near_end", 1))
+        self._song_end_window = max(
+            0.0, AUDIO_RECOGNITION.get("song_end_window", 30.0))
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._failures = 0
@@ -422,13 +428,25 @@ class PlayerRecognizer:
             result.get_current_position(), result.time_skew,
             result.frequency_skew, pos)
 
+    def _blank_threshold(self) -> int:
+        """How many consecutive no-matches to tolerate before blanking. Near the
+        end of a known-duration song a no-match likely means it really ended (blank
+        fast); mid-song it's more likely a transient miss (tolerate more)."""
+        result = self._current
+        duration = getattr(result, "duration", None) if result is not None else None
+        if duration:
+            remaining = duration - result.get_current_position()
+            if remaining <= self._song_end_window:
+                return self._blank_after_near_end
+        return self._blank_after
+
     async def _handle_failure(self):
         self._failures += 1
-        # The song has ended (advert / DJ talk / silence between tracks). After the
-        # configured number of consecutive no-matches, drop the held result so
-        # current-track reports no track and the UI fades the now-playing metadata +
-        # lyrics away until the next recognition. Default threshold is 1 (immediate).
-        if self._failures >= self._blank_after and self._current is not None:
+        # A no-match means the song may have ended (advert / DJ talk / silence) — or
+        # it's just a transient miss mid-song. Once enough consecutive no-matches
+        # accumulate (threshold depends on how close we are to the song's end), drop
+        # the held result so current-track reports no track and the UI fades away.
+        if self._failures >= self._blank_threshold() and self._current is not None:
             self._current = None
             self._lock.reset()
             self._paused = True

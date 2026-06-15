@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.61
+
+- **Context-aware lyric blanking — fewer false fades on microphone input.** A single
+  no-match used to clear the held track immediately (`blank_after_failures` default
+  1), so a transient miss mid-song (a quiet passage, or a brief gap when a mic
+  restarts its stream) faded the artwork/lyrics and made the next match look like a
+  brand-new song — a constant fade/art-reload churn. Blanking is now position-aware:
+  - **Mid-song:** tolerate `blank_after_failures` consecutive misses (new default **3**).
+  - **Near a song's end** (within `song_end_window` of a known duration, default
+    **30 s**): blank after `blank_after_failures_near_end` misses (default **1**), so
+    genuine song-ends still fade promptly.
+  - Unknown duration (e.g. radio with no length) falls back to the tolerant mid-song
+    threshold. All three values are add-on options.
+
 ## 1.0.60
 
 - **Faster lyrics with multiple clients: coalesce concurrent fetches for the same

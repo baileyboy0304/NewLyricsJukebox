@@ -150,9 +150,13 @@ AUDIO_RECOGNITION = {
     "silence_threshold": _as_int(conf("silence_threshold", 350), 350),
     "verification_cycles": _as_int(conf("verification_cycles", 2), 2),
     # Consecutive failed recognitions before the now-playing metadata + lyrics are
-    # cleared (the UI then fades to just the transport controls). Default 1 so the
-    # screen blanks immediately when a song ends / an advert starts.
-    "blank_after_failures": _as_int(conf("blank_after_failures", 1), 1),
+    # cleared (the UI then fades to just the transport controls). Context-aware: a
+    # no-match NEAR the end of a known-duration song probably means the song really
+    # ended, so blank fast; MID-song a no-match is more likely a transient miss
+    # (quiet passage, mic gap), so tolerate more before blanking.
+    "blank_after_failures": _as_int(conf("blank_after_failures", 3), 3),
+    "blank_after_failures_near_end": _as_int(conf("blank_after_failures_near_end", 1), 1),
+    "song_end_window": _as_float(conf("song_end_window", 30.0), 30.0),
     # --- TEST FEATURE: ACR priority (one ACRCloud refinement per track) ---
     # When ON, each newly-detected track gets exactly ONE ACRCloud lookup to
     # refine the Shazam position (ACR is assumed more accurate). If the ACR
