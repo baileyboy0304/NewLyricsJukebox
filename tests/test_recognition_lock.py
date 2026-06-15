@@ -151,6 +151,36 @@ def test_recognition_call_times_out_and_loop_continues():
     asyncio.run(scenario())
 
 
+def test_blank_threshold_is_context_aware_near_song_end():
+    """Mid-song a no-match needs more failures to blank; within the song-end window
+    (known duration) it blanks fast. Unknown duration falls back to the mid-song
+    threshold."""
+    import time
+
+    from recognition.engine import PlayerRecognizer
+    from recognition.result import RecognitionResult
+
+    rec = PlayerRecognizer("z", capture=None)
+    rec._blank_after = 3
+    rec._blank_after_near_end = 1
+    rec._song_end_window = 30.0
+
+    # Mid-song: 200s track, 50s in -> 150s remaining -> mid-song threshold.
+    rec._current = RecognitionResult(title="T", artist="A", offset=50.0,
+                                     capture_start_time=time.time(), duration=200.0)
+    assert rec._blank_threshold() == 3
+
+    # Near the end: 200s track, 185s in -> 15s remaining -> near-end threshold.
+    rec._current = RecognitionResult(title="T", artist="A", offset=185.0,
+                                     capture_start_time=time.time(), duration=200.0)
+    assert rec._blank_threshold() == 1
+
+    # Unknown duration (radio) -> can't tell, use the tolerant mid-song threshold.
+    rec._current = RecognitionResult(title="T", artist="A", offset=185.0,
+                                     capture_start_time=time.time(), duration=None)
+    assert rec._blank_threshold() == 3
+
+
 def test_timeout_does_not_clear_held_track():
     """A hung Shazam call (timeout) is a hiccup, not a song-end: it must NOT clear
     the held track (the brief lyrics 'blip') or count as a blanking failure."""

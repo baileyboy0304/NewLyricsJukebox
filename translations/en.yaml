@@ -50,11 +50,23 @@ configuration:
       Manual fine-tuning of lyric timing. Positive shows lyrics later, negative
       shows them earlier. Default 0.
   blank_after_failures:
-    name: Recognition — Fade lyrics after N failed recognitions
+    name: Recognition — Fade lyrics after N failed recognitions (mid-song)
     description: >-
-      When a stream stops matching (song ended, advert, or DJ talking), fade the
-      artwork, track details and lyrics away after this many consecutive misses,
-      leaving just the transport controls. Default 1 (fade immediately).
+      Mid-song, a no-match is usually a transient miss (a quiet passage or a brief
+      microphone gap), so wait this many consecutive misses before fading the
+      artwork, track details and lyrics. Default 3.
+  blank_after_failures_near_end:
+    name: Recognition — Fade lyrics after N failed recognitions (near song end)
+    description: >-
+      Within the "song end window" of a known-duration track, a no-match probably
+      means the song really ended, so fade after this many consecutive misses.
+      Default 1 (fade immediately).
+  song_end_window:
+    name: Recognition — Song-end window (seconds)
+    description: >-
+      How close to a track's end (when the duration is known) counts as "near the
+      end", switching from the mid-song fade threshold to the near-end one.
+      Default 30.
   acr_priority:
     name: Recognition — ACR priority (TEST)
     description: >-
