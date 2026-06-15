@@ -68,6 +68,11 @@ class Controller:
         # what lets an ESPHome display drive its own lyrics without a web page open.
         self.leases: Dict[str, float] = {}
         self._supervisor_task: Optional[asyncio.Task] = None
+        # Explicit mic -> speaker association (set by the bridge). Maps a player key
+        # (a mic) to the MA player id whose audio it's hearing, so metadata-first
+        # reads the speaker's now-playing instead of recognising the mic. Radio /
+        # no-metadata still falls back to recognising the mic's own audio.
+        self.source_players: Dict[str, str] = {}
 
     # -- player discovery / resolution ------------------------------------ #
 
@@ -289,6 +294,17 @@ class Controller:
         self.leases[key] = time.time() + LEASE_TTL
         return key
 
+    def set_source_player(self, key: str, source_player: Optional[str]) -> None:
+        """Associate a player (a mic) with the MA player whose audio it's hearing
+        (its speaker). ``""`` clears it; ``None`` leaves it unchanged (consumers
+        that don't manage associations, e.g. the web UI, simply omit it)."""
+        if source_player is None:
+            return
+        if source_player:
+            self.source_players[key] = source_player
+        else:
+            self.source_players.pop(key, None)
+
     def track_snapshot(self, param: Optional[str]) -> dict:
         """Read-only view of a player's current track. The HTTP layer never drives
         recognition any more — the supervisor does — so this just returns whatever
@@ -314,6 +330,8 @@ class Controller:
         stream (no point recognizing silence); players without a gaugeable stream
         (pure MA / Spotify Connect) are cheap (metadata-first, no recognition) so
         they stay desired while leased."""
+        if key in self.source_players:
+            return True   # metadata comes from the associated speaker, not the mic
         _k, _ma_id, stream_key, _n = self._resolve(key)
         if self.capture and stream_key:
             s = self.capture.get_stream(stream_key)
@@ -405,6 +423,23 @@ class Controller:
         # An explicit pick (not Auto) must be honoured: we don't silently migrate
         # it to another live stream, nor borrow an unrelated player's metadata.
         is_auto = not param or param == "auto"
+
+        # 0) EXPLICIT SOURCE ASSOCIATION (from the bridge): this mic told us which
+        #    speaker it's listening to. Read THAT speaker's now-playing — if MA can
+        #    describe it (Spotify Connect / Spotify / Apple / local queue), use it
+        #    and skip recognition entirely. Radio (station name only) or no metadata
+        #    falls through to recognising the mic's own audio below.
+        source_id = self.source_players.get(key)
+        if source_id and self.ma and self.ma.connected:
+            src = await self.ma.get_player_state(source_id)
+            if src is not None and src.title and not self._is_radio(src):
+                track = self._ma_track(src, name)   # keep the mic's display name
+                runtime.mode = track["source"]
+                runtime.track = track
+                runtime.position_at = time.time()
+                runtime.rec_stream = None            # speaker describes it; no recognition
+                self._log_mode(runtime, name, track["source"], track["title"])
+                return track
 
         state: Optional[PlayerState] = None
         if self.ma and self.ma.connected and ma_id:
@@ -876,13 +911,15 @@ def create_app(controller: Controller) -> Quart:
         # Renew the engine lease and return what the supervisor last computed —
         # the HTTP layer no longer drives recognition itself.
         player = request.args.get("player")
-        controller.touch_lease(player)
+        key = controller.touch_lease(player)
+        controller.set_source_player(key, request.args.get("source_player"))
         return jsonify(controller.track_snapshot(player))
 
     @app.route("/lyrics")
     async def lyrics_route():
         player = request.args.get("player")
-        controller.touch_lease(player)
+        key = controller.touch_lease(player)
+        controller.set_source_player(key, request.args.get("source_player"))
         return jsonify(await controller.lyrics(player, request.args.get("provider")))
 
     @app.route("/bad-match", methods=["POST"])
