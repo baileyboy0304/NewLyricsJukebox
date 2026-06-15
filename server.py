@@ -47,6 +47,7 @@ class PlayerRuntime:
     log_key: Optional[str] = None     # last (mode,title) we logged
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
+    log_assoc: Optional[str] = None   # last source-association state we logged
 
 
 class Controller:
@@ -432,6 +433,18 @@ class Controller:
         source_id = self.source_players.get(key)
         if source_id and self.ma and self.ma.connected:
             src = await self.ma.get_player_state(source_id)
+            # Diagnostic: log what MA returned for the associated source player so a
+            # silent step-0 miss can be traced (src=None, title missing, radio, etc.).
+            desc = (
+                "src=none" if src is None else
+                "title=%r artist=%r mt=%s source=%s playing=%s pos=%s"
+                % (src.title, src.artist, src.media_type, src.active_source_name,
+                   src.is_playing, src.position)
+            )
+            if runtime.log_assoc != desc:
+                runtime.log_assoc = desc
+                logger.info("source-assoc player=%s source_id=%s %s",
+                            name, source_id, desc)
             if src is not None and src.title and not self._is_radio(src):
                 track = self._ma_track(src, name)   # keep the mic's display name
                 runtime.mode = track["source"]

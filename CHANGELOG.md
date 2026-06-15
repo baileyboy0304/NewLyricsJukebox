@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.63
+
+- **Ecosystem documentation** — `CLAUDE.md` expanded with the full
+  four-project map (NLJ, `ha-udp-lyrics-player`, sendspin ESPHome firmware,
+  `lyrics-mic-bridge`), module map, REST endpoint catalogue, and the
+  source-of-truth precedence (MA queue > MA external > bridge association
+  > recognition).
+- **`TEST_PLAN.md`** — Spotify Connect / MA Spotify / UDP dummy / radio
+  walkthrough with the exact log lines to capture and a failure-signature
+  → code-location map.
+- **Diagnostic log for source-association** — `current_track()` step 0
+  was silently falling through to recognition when MA had the track on
+  the associated source player. Now emits one deduped `source-assoc` line
+  per change showing exactly what MA returned (`src=none` / `title=…` /
+  `mt=…` / `source=…` / `playing=…`), so the failure mode is no longer
+  invisible.
+
 ## 1.0.62
 
 - **Mic ↔ speaker association: use the speaker's metadata instead of recognising.**
