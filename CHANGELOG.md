@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.69
+
+- **Fix: MA exposes one device under multiple player ids.** The 1.0.68
+  diagnostics showed the bridge's name-based poll resolved to
+  `ma_id='30:ED:A0:E2:0B:1C'` (a MAC-address-style wrapper) while the
+  RTP stream coming in from the same device was identified with
+  `ma_id='waveshare-mic-e20b1c'` (the sendspin slug). The previous
+  attempts at a "canonical id" assumed there was only one such id —
+  there isn't.
+  `source_meta` is now stored under **every alias** that points to the
+  same device (literal key, MA id, friendly name, and any active RTP
+  stream whose name or ma_player_id matches), and the lookup tries all
+  candidates. Both the bridge's poll and the post-migration browser
+  poll now converge on at least one shared alias.
+- Removes the 1.0.68 `ct-enter` / `ct-migrate-check` / `source-meta
+  HIT|MISS|STALE` diagnostic spam now that the cause is understood.
+  The `set-source-meta` line is kept (one per poll) so it's still
+  obvious when the bridge is writing entries.
+
 ## 1.0.68
 
 - **Diagnostic only — no behaviour change.** Adds verbose logging
