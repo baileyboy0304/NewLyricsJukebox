@@ -74,6 +74,13 @@ class Controller:
         # reads the speaker's now-playing instead of recognising the mic. Radio /
         # no-metadata still falls back to recognising the mic's own audio.
         self.source_players: Dict[str, str] = {}
+        # Direct source metadata pushed by the bridge (NLJ ≥ 1.0.64). Maps player
+        # key -> (recv_time, track_dict). Used when the bridge polls with
+        # source_title=… etc — built straight from the speaker's HA media_player
+        # entity, so no MA round-trip and no player-id resolution is needed.
+        # Entries older than SOURCE_META_TTL are treated as absent (covers the
+        # bridge-crash case) so a stale title can't keep recognition off forever.
+        self.source_meta: Dict[str, tuple] = {}
 
     # -- player discovery / resolution ------------------------------------ #
 
@@ -295,6 +302,44 @@ class Controller:
         self.leases[key] = time.time() + LEASE_TTL
         return key
 
+    # Treat pushed source metadata as stale after this long without a refresh.
+    # Matches the engine lease TTL — a bridge that stops polling is reasonably
+    # considered offline within the same window.
+    SOURCE_META_TTL = 6.0
+
+    def set_source_metadata(self, key: str, args) -> None:
+        """Receive direct now-playing metadata from the bridge (Cast / HA
+        media_player attrs forwarded straight through). Absence of
+        ``source_title`` clears the entry — that's how the bridge signals radio /
+        idle, so step 0 falls back to recognition."""
+        title = (args.get("source_title") or "").strip()
+        if not title:
+            self.source_meta.pop(key, None)
+            return
+        try:
+            pos = float(args.get("source_position") or 0.0)
+        except (TypeError, ValueError):
+            pos = 0.0
+        try:
+            dur_ms = int(args.get("source_duration_ms") or 0) or None
+        except (TypeError, ValueError):
+            dur_ms = None
+        is_playing = (args.get("source_is_playing") or "").lower() == "true"
+        track = {
+            "source": "stream",          # external Cast/Connect — not seekable from us
+            "from_ma": False,
+            "title": title,
+            "artist": (args.get("source_artist") or "").strip() or None,
+            "album": (args.get("source_album") or "").strip() or None,
+            "album_art_url": (args.get("source_art") or "").strip() or None,
+            "position": pos,
+            "duration_ms": dur_ms,
+            "is_playing": is_playing,
+            "seekable": False,
+        }
+        track["track_id"] = f"{track['artist']}|{track['title']}"
+        self.source_meta[key] = (time.time(), track)
+
     def set_source_player(self, key: str, source_player: Optional[str]) -> None:
         """Associate a player (a mic) with the MA player whose audio it's hearing
         (its speaker). ``""`` clears it; ``None`` leaves it unchanged (consumers
@@ -425,11 +470,28 @@ class Controller:
         # it to another live stream, nor borrow an unrelated player's metadata.
         is_auto = not param or param == "auto"
 
-        # 0) EXPLICIT SOURCE ASSOCIATION (from the bridge): this mic told us which
-        #    speaker it's listening to. Read THAT speaker's now-playing — if MA can
-        #    describe it (Spotify Connect / Spotify / Apple / local queue), use it
-        #    and skip recognition entirely. Radio (station name only) or no metadata
-        #    falls through to recognising the mic's own audio below.
+        # 0a) DIRECT SOURCE METADATA (from the bridge, NLJ ≥ 1.0.64). The bridge
+        #     reads the speaker's HA media_player attrs (Cast / Sonos / AirPlay /
+        #     MA wrapper alike) and forwards them on every poll. We use them as-is
+        #     — no MA round-trip and no player-id resolution. Radio is signalled
+        #     by absence (the bridge omits source_title when content_type=radio),
+        #     so a missing entry naturally falls through to recognition.
+        meta = self.source_meta.get(key)
+        if meta is not None and (time.time() - meta[0]) <= self.SOURCE_META_TTL:
+            track = {**meta[1], "player": name}
+            runtime.mode = "stream"
+            runtime.track = track
+            runtime.position_at = time.time()
+            runtime.rec_stream = None
+            self._log_mode(runtime, name, "stream", track["title"], " (source-meta)")
+            return track
+
+        # 0b) EXPLICIT SOURCE ASSOCIATION (from the bridge, legacy ≤ 1.0.63): this
+        #    mic told us which speaker it's listening to. Read THAT speaker's
+        #    now-playing — if MA can describe it (Spotify Connect / Spotify /
+        #    Apple / local queue), use it and skip recognition entirely. Radio
+        #    (station name only) or no metadata falls through to recognising the
+        #    mic's own audio below.
         source_id = self.source_players.get(key)
         if source_id and self.ma and self.ma.connected:
             src = await self.ma.get_player_state(source_id)
@@ -926,6 +988,7 @@ def create_app(controller: Controller) -> Quart:
         player = request.args.get("player")
         key = controller.touch_lease(player)
         controller.set_source_player(key, request.args.get("source_player"))
+        controller.set_source_metadata(key, request.args)
         return jsonify(controller.track_snapshot(player))
 
     @app.route("/lyrics")
@@ -933,6 +996,7 @@ def create_app(controller: Controller) -> Quart:
         player = request.args.get("player")
         key = controller.touch_lease(player)
         controller.set_source_player(key, request.args.get("source_player"))
+        controller.set_source_metadata(key, request.args)
         return jsonify(await controller.lyrics(player, request.args.get("provider")))
 
     @app.route("/bad-match", methods=["POST"])
