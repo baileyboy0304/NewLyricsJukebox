@@ -513,28 +513,49 @@ class Controller:
         current poll. We try ma_id, key, name, and stream_key — MA can
         expose a single device under multiple player ids (e.g. a sendspin
         slug plus a MAC-address wrapper), so we have to look across all of
-        them rather than rely on one canonical key."""
+        them rather than rely on one canonical key.
+
+        Last-resort fallback: if no candidate matches BUT there's exactly
+        one fresh entry in source_meta, return that. This rescues the case
+        where a browser holds a SSRC that was dropped from udp_capture
+        after the mic stopped streaming (mic_required gate) — the entry is
+        still being refreshed by the bridge under its stable aliases, just
+        not under the SSRC the browser is asking for. Single-bridged-device
+        setups recover transparently; multi-bridge setups don't apply the
+        fallback (ambiguous) and the browser sees the placeholder until
+        the user repicks.
+        """
         candidates = []
         seen = set()
         for cid in (ma_id, key, name, stream_key):
             if cid and cid not in seen:
                 seen.add(cid)
                 candidates.append(cid)
+        now = time.time()
         for cid in candidates:
             meta = self.source_meta.get(cid)
             if meta is None:
                 continue
-            age = time.time() - meta[0]
-            if age > self.SOURCE_META_TTL:
+            if (now - meta[0]) > self.SOURCE_META_TTL:
                 continue
-            track = {**meta[1], "player": name}
-            runtime.mode = "stream"
-            runtime.track = track
-            runtime.position_at = time.time()
-            runtime.rec_stream = None
-            self._log_mode(runtime, name, "stream", track["title"], tag)
-            return track
+            return self._emit_source_meta(runtime, meta[1], name, tag)
+        # Last-resort: exactly one fresh entry → use it.
+        fresh = {id(meta): meta for meta in self.source_meta.values()
+                 if (now - meta[0]) <= self.SOURCE_META_TTL}
+        if len(fresh) == 1:
+            (meta,) = fresh.values()
+            return self._emit_source_meta(runtime, meta[1], name,
+                                          tag + " single-fallback")
         return None
+
+    def _emit_source_meta(self, runtime, base_track, name, tag):
+        track = {**base_track, "player": name}
+        runtime.mode = "stream"
+        runtime.track = track
+        runtime.position_at = time.time()
+        runtime.rec_stream = None
+        self._log_mode(runtime, name, "stream", track["title"], tag)
+        return track
 
     async def current_track(self, param: Optional[str]) -> dict:
         key, ma_id, stream_key, name = self._resolve(param)
