@@ -476,6 +476,22 @@ class Controller:
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         return track
 
+    def _try_source_meta(self, runtime, ma_id, key, name, tag=" (source-meta)"):
+        """Return a fresh track dict if the bridge has pushed metadata for this
+        device, else None. Looked up by canonical id (MA player id when
+        available) so the bridge's name-based polls and the browser's
+        SSRC-based polls hit the same entry."""
+        meta = self.source_meta.get(ma_id or key)
+        if meta is None or (time.time() - meta[0]) > self.SOURCE_META_TTL:
+            return None
+        track = {**meta[1], "player": name}
+        runtime.mode = "stream"
+        runtime.track = track
+        runtime.position_at = time.time()
+        runtime.rec_stream = None
+        self._log_mode(runtime, name, "stream", track["title"], tag)
+        return track
+
     async def current_track(self, param: Optional[str]) -> dict:
         key, ma_id, stream_key, name = self._resolve(param)
         name = self._friendly_name(key, name)
@@ -490,17 +506,8 @@ class Controller:
         #     — no MA round-trip and no player-id resolution. Radio is signalled
         #     by absence (the bridge omits source_title when content_type=radio),
         #     so a missing entry naturally falls through to recognition.
-        # Look up by canonical id (MA player id when available) so a browser
-        # poll using the SSRC key finds the entry the bridge stored under the
-        # device name — both resolve to the same MA player id.
-        meta = self.source_meta.get(ma_id or key)
-        if meta is not None and (time.time() - meta[0]) <= self.SOURCE_META_TTL:
-            track = {**meta[1], "player": name}
-            runtime.mode = "stream"
-            runtime.track = track
-            runtime.position_at = time.time()
-            runtime.rec_stream = None
-            self._log_mode(runtime, name, "stream", track["title"], " (source-meta)")
+        track = self._try_source_meta(runtime, ma_id, key, name)
+        if track is not None:
             return track
 
         # 0b) EXPLICIT SOURCE ASSOCIATION (from the bridge, legacy ≤ 1.0.63): this
@@ -552,6 +559,16 @@ class Controller:
             if live is not None and live.ma_player_id and live.ma_player_id != ma_id:
                 ma_id, stream_key = live.ma_player_id, live.key
                 name = self._friendly_name(live.key, live.name)
+                # Re-check source_meta with the migrated ma_id: a stale-SSRC
+                # poll (browser holding an old SSRC after NLJ restart) maps
+                # to the canonical mic id only after this migration, so step
+                # 0a above couldn't find the bridge's entry. Without this
+                # re-check we'd fall through to step 3 and start recognition
+                # for a device the bridge is already feeding metadata for.
+                track = self._try_source_meta(runtime, ma_id, key, name,
+                                              tag=" (source-meta after migrate)")
+                if track is not None:
+                    return track
                 if self.ma and self.ma.connected:
                     state = await self.ma.get_player_state(ma_id)
 
