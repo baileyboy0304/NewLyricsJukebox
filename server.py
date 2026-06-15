@@ -48,6 +48,7 @@ class PlayerRuntime:
     log_line: Optional[str] = None    # last current-lyric line we logged
     log_class: Optional[str] = None   # last MA classification we logged
     log_assoc: Optional[str] = None   # last source-association state we logged
+    log_diag: Optional[str] = None    # last ct-enter diagnostic line
 
 
 class Controller:
@@ -353,6 +354,8 @@ class Controller:
         }
         track["track_id"] = f"{track['artist']}|{track['title']}"
         self.source_meta[cid] = (time.time(), track)
+        logger.info("set-source-meta key=%r cid=%r title=%r (have=%r)",
+                    key, cid, title, sorted(self.source_meta.keys()))
 
     def set_source_player(self, key: str, source_player: Optional[str]) -> None:
         """Associate a player (a mic) with the MA player whose audio it's hearing
@@ -481,9 +484,17 @@ class Controller:
         device, else None. Looked up by canonical id (MA player id when
         available) so the bridge's name-based polls and the browser's
         SSRC-based polls hit the same entry."""
-        meta = self.source_meta.get(ma_id or key)
-        if meta is None or (time.time() - meta[0]) > self.SOURCE_META_TTL:
+        cid = ma_id or key
+        meta = self.source_meta.get(cid)
+        if meta is None:
+            logger.info("source-meta MISS cid=%r (have=%r)", cid,
+                        sorted(self.source_meta.keys()))
             return None
+        age = time.time() - meta[0]
+        if age > self.SOURCE_META_TTL:
+            logger.info("source-meta STALE cid=%r age=%.2fs", cid, age)
+            return None
+        logger.info("source-meta HIT cid=%r age=%.2fs title=%r", cid, age, meta[1].get("title"))
         track = {**meta[1], "player": name}
         runtime.mode = "stream"
         runtime.track = track
@@ -499,6 +510,15 @@ class Controller:
         # An explicit pick (not Auto) must be honoured: we don't silently migrate
         # it to another live stream, nor borrow an unrelated player's metadata.
         is_auto = not param or param == "auto"
+        # Diagnostic: dump everything that matters for the source_meta / step-0a
+        # decision. Deduped per (param, ma_id, source_meta keys) so we get one
+        # line per state change, not per supervisor tick.
+        sm_keys = sorted(self.source_meta.keys())
+        diag = "param=%r key=%r ma_id=%r stream_key=%r sm_keys=%r" % (
+            param, key, ma_id, stream_key, sm_keys)
+        if runtime.log_diag != diag:
+            runtime.log_diag = diag
+            logger.info("ct-enter %s", diag)
 
         # 0a) DIRECT SOURCE METADATA (from the bridge, NLJ ≥ 1.0.64). The bridge
         #     reads the speaker's HA media_player attrs (Cast / Sonos / AirPlay /
@@ -556,9 +576,14 @@ class Controller:
         # only Auto (or a dead/stale selected stream) re-points to another stream.
         if state is None and self.capture and not (not is_auto and sel_live):
             live = self.capture.first_active_stream()
+            logger.info("ct-migrate-check key=%r ma_id=%r live=%r live_ma=%r",
+                        key, ma_id,
+                        getattr(live, "key", None) if live else None,
+                        getattr(live, "ma_player_id", None) if live else None)
             if live is not None and live.ma_player_id and live.ma_player_id != ma_id:
                 ma_id, stream_key = live.ma_player_id, live.key
                 name = self._friendly_name(live.key, live.name)
+                logger.info("ct-migrated key=%r -> ma_id=%r stream_key=%r", key, ma_id, stream_key)
                 # Re-check source_meta with the migrated ma_id: a stale-SSRC
                 # poll (browser holding an old SSRC after NLJ restart) maps
                 # to the canonical mic id only after this migration, so step

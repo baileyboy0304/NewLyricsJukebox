@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.68
+
+- **Diagnostic only — no behaviour change.** Adds verbose logging
+  around source_meta and the stale-SSRC migration so we can see in
+  the wild why 1.0.67 still drops into recognition for a bridged
+  Spotify Connect speaker. Emits:
+
+  - `set-source-meta key=… cid=… title=… (have=…)` whenever the
+    bridge stores an entry.
+  - `ct-enter param=… key=… ma_id=… stream_key=… sm_keys=…` on
+    every current_track call (deduped per state change).
+  - `source-meta HIT|MISS|STALE cid=… (have=…)` inside the lookup.
+  - `ct-migrate-check / ct-migrated` around the stale-SSRC migration.
+
+  Run for ~10 s with the bridge polling and the browser open, paste
+  back. This will be reverted once the root cause is fixed.
+
 ## 1.0.67
 
 - **Fix: stale-SSRC polls bypassed source_meta.** When NLJ restarts, the
