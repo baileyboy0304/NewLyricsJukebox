@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.64
+
+- **Accept now-playing metadata directly on the poll URL** — new step 0a in
+  `/current-track` and `/lyrics` reads `source_title`, `source_artist`,
+  `source_album`, `source_position`, `source_duration_ms`,
+  `source_is_playing`, `source_art` and uses them as the track for that
+  player. No Music Assistant round-trip, no source-player id resolution.
+  This is what lets `lyrics-mic-bridge` ≥ 1.0.2 forward a Cast / Sonos /
+  AirPlay speaker's HA `media_player` attributes straight through — the
+  user can deliberately pick the Cast entity (so plays started by Alexa
+  are visible) and NLJ still gets exact title/artist/position without
+  trying to guess an MA player id. The bridge omits `source_title` for
+  radio, which naturally falls through to recognition. Entries are
+  treated as stale after 6 s without a refresh (matches the engine
+  lease TTL) so a crashed bridge can't keep recognition switched off.
+- The legacy `source_player=<MA id>` path (step 0b) is retained for
+  backwards compatibility.
+
 ## 1.0.63
 
 - **Ecosystem documentation** — `CLAUDE.md` expanded with the full
