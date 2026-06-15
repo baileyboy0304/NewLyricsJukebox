@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.67
+
+- **Fix: stale-SSRC polls bypassed source_meta.** When NLJ restarts, the
+  browser keeps polling for the previously-known SSRC (`c8bd0fd1` in the
+  user's repro). `_resolve()` on a dead SSRC returns the param itself as
+  the (placeholder) ma_id, so step 0a's lookup misses. The existing
+  stale-SSRC migration block (server.py ~550) then rewrites ma_id to
+  the canonical mic id and falls into step 3 → recogniser started even
+  though the bridge has been feeding `source_title` for that device the
+  whole time. Step 0a is now re-checked after the migration so the
+  bridge's entry is honoured regardless of which SSRC the client thinks
+  it's polling.
+
 ## 1.0.66
 
 - **Fix: bridge and browser polls keyed `source_meta` differently for the
