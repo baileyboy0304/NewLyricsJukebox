@@ -309,9 +309,14 @@ class Controller:
 
     def set_source_metadata(self, key: str, args) -> None:
         """Receive direct now-playing metadata from the bridge (Cast / HA
-        media_player attrs forwarded straight through). Absence of
-        ``source_title`` clears the entry — that's how the bridge signals radio /
-        idle, so step 0 falls back to recognition."""
+        media_player attrs forwarded straight through). Only acts when the
+        caller actually included ``source_title`` in the query — the browser
+        polls without any source_* params, and we must NOT clear the bridge's
+        cache on its behalf. The bridge can pass an empty ``source_title`` to
+        clear the entry explicitly (e.g. on radio); otherwise the 6 s TTL
+        handles eventual cleanup."""
+        if "source_title" not in args:
+            return
         title = (args.get("source_title") or "").strip()
         if not title:
             self.source_meta.pop(key, None)

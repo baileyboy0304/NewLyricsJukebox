@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.65
+
+- **Fix: browser polls were clearing the bridge's source metadata.** The
+  1.0.64 `/current-track` route called `set_source_metadata()`
+  unconditionally, and any poll without a `source_title` param (e.g. the
+  browser UI) popped the bridge's cached entry. The bridge would re-set
+  it on its next poll, then the browser would wipe it again — race
+  condition observed in the wild as "title=Belfast Child (source-meta)
+  → 3 ms later → Started recognizer". Now: only act when the caller
+  included `source_title` in the query. An empty value still clears
+  (bridge can signal radio explicitly); absence is a no-op.
+
 ## 1.0.64
 
 - **Accept now-playing metadata directly on the poll URL** — new step 0a in
