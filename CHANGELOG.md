@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.70
+
+- **Log hygiene.** The 1.0.69 `set-source-meta` line fires on every
+  bridge poll — twice a second per device with the default
+  `nlj_poll_seconds=1`. Now deduped: only logged when the title or the
+  alias set actually changes. Steady-state playback is silent again;
+  any genuine source-meta change still surfaces immediately.
+
 ## 1.0.69
 
 - **Fix: MA exposes one device under multiple player ids.** The 1.0.68

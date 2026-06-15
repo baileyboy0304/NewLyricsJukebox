@@ -81,6 +81,9 @@ class Controller:
         # Entries older than SOURCE_META_TTL are treated as absent (covers the
         # bridge-crash case) so a stale title can't keep recognition off forever.
         self.source_meta: Dict[str, tuple] = {}
+        # Last (key, title, aliases) we logged for set-source-meta, so the line
+        # only fires on a real change instead of on every 1 s bridge poll.
+        self._source_meta_log: Dict[str, tuple] = {}
 
     # -- player discovery / resolution ------------------------------------ #
 
@@ -375,8 +378,11 @@ class Controller:
         entry = (time.time(), track)
         for a in aliases:
             self.source_meta[a] = entry
-        logger.info("set-source-meta key=%r aliases=%r title=%r",
-                    key, sorted(aliases), title)
+        sig = (title, tuple(sorted(aliases)))
+        if self._source_meta_log.get(key) != sig:
+            self._source_meta_log[key] = sig
+            logger.info("set-source-meta key=%r aliases=%r title=%r",
+                        key, sorted(aliases), title)
 
     def set_source_player(self, key: str, source_player: Optional[str]) -> None:
         """Associate a player (a mic) with the MA player whose audio it's hearing
