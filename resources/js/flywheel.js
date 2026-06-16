@@ -83,3 +83,58 @@ export function activeLineIndex(lines, position) {
   }
   return idx;
 }
+
+// ServerClock estimates the offset between the browser's local clock and
+// the server's NTP-synced clock so absolute lyric `display_at_epoch_ms`
+// values can be compared against "server-now-as-seen-from-here". Uses a
+// simple Cristian-style round-trip estimate: server reports its wall
+// clock; we subtract half the round-trip from the response timestamp.
+// Resync periodically to absorb drift.
+export class ServerClock {
+  constructor() {
+    this.offsetMs = 0;       // server_ms - local_ms (add to Date.now())
+    this.rttMs = 0;
+    this.lastSyncAt = 0;     // Date.now() of last successful sync
+    this.synced = false;
+  }
+
+  // Call with the timestamps from a /time fetch. `sentAt` and `receivedAt`
+  // are local Date.now() bookends around the request; `serverMs` is what
+  // the server reported.
+  applySample(sentAt, receivedAt, serverMs) {
+    const rtt = receivedAt - sentAt;
+    // Best estimate of server-now at receivedAt: serverMs + rtt/2.
+    const offset = (serverMs + rtt / 2) - receivedAt;
+    // First sample wins; subsequent samples EMA in so a single bad rtt
+    // can't yank the clock.
+    if (!this.synced) {
+      this.offsetMs = offset;
+      this.rttMs = rtt;
+      this.synced = true;
+    } else {
+      this.offsetMs = this.offsetMs * 0.7 + offset * 0.3;
+      this.rttMs = this.rttMs * 0.7 + rtt * 0.3;
+    }
+    this.lastSyncAt = receivedAt;
+  }
+
+  nowMs() {
+    return Date.now() + this.offsetMs;
+  }
+}
+
+// Active line index by absolute NTP display time. Use this in preference
+// to position-based picking once `display_at_epoch_ms` is present on each
+// line: a line becomes active the moment server-wall-clock-now reaches
+// its display_at. Falls back to the position-based picker if any line
+// lacks the absolute timestamp.
+export function activeLineIndexByTime(lines, serverNowMs) {
+  if (!lines || lines.length === 0) return -1;
+  if (lines[0].display_at_epoch_ms == null) return -1;
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (serverNowMs >= lines[i].display_at_epoch_ms) idx = i;
+    else break;
+  }
+  return idx;
+}

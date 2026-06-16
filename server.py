@@ -26,6 +26,19 @@ logger = logging.getLogger(__name__)
 LEASE_TTL = 6.0
 
 
+def _track_anchor_ms(runtime) -> int:
+    """Wall-clock epoch-ms at which the current track's playback position
+    was 0. Used to compute absolute display_at times for each lyric line:
+    `display_at_ms = anchor_ms + line.start * 1000 + timing_offset_ms`.
+
+    Returns the current time if no position has been captured yet, so the
+    payload still includes a sane (if conservative) anchor."""
+    if not runtime.position_at:
+        return int(time.time() * 1000)
+    position = float(runtime.track.get("position") or 0.0)
+    return int((runtime.position_at - position) * 1000)
+
+
 @dataclass
 class PlayerRuntime:
     """Per-player state — never module globals (AUDIT.md cluster D)."""
@@ -402,9 +415,11 @@ class Controller:
         key, _ma_id, _stream_key, name = self._resolve(param)
         name = self._friendly_name(key, name)
         rt = self.runtimes.get(key)
+        now_ms = int(time.time() * 1000)
         if rt is None or not rt.track:
             return {"source": rt.mode if rt else "stream", "player": name,
-                    "title": None, "artist": None, "is_playing": False, "seekable": False}
+                    "title": None, "artist": None, "is_playing": False,
+                    "seekable": False, "server_time_ms": now_ms}
         track = rt.track
         # The supervisor only recomputes the position ~once/second, but the browser
         # polls ~10x/s and re-anchors its flywheel each time — anchoring on a frozen
@@ -413,6 +428,14 @@ class Controller:
         # smoothly-progressing value, like the old per-poll recompute did.
         if track.get("is_playing") and track.get("position") is not None and rt.position_at:
             track = {**track, "position": track["position"] + (time.time() - rt.position_at)}
+        # NTP-anchor metadata so clients can render lyric lines on absolute
+        # wall-clock time (see _lyrics_payload / _track_anchor_ms).
+        track = {
+            **track,
+            "server_time_ms": now_ms,
+            "track_anchor_ms": _track_anchor_ms(rt),
+            "preload_time": LYRICS["preload_time"],
+        }
         return track
 
     def _player_active(self, key: str) -> bool:
@@ -757,10 +780,20 @@ class Controller:
             "word_synced": [],
             "timing_offset": timing_offset,
             "suppress_lyrics": suppress_lyrics,
+            "server_time_ms": int(time.time() * 1000),
+            "preload_time": LYRICS["preload_time"],
+            "track_anchor_ms": None,
         }
 
     def _lyrics_payload(self, track_id, data, providers, lines, timing_offset=0.0,
-                        suppress_lyrics=False):
+                        suppress_lyrics=False, track_anchor_ms=None):
+        preload = LYRICS["preload_time"]
+        now_ms = int(time.time() * 1000)
+        if track_anchor_ms is None:
+            # Fallback: anchor is "now minus 0 position" — line scheduling
+            # will be approximate. Callers should pass the real anchor.
+            track_anchor_ms = now_ms
+        line_synced = list(visible_lines(data.line_synced))
         return {
             "track_id": track_id,
             "has_lyrics": data.has_lyrics,
@@ -772,11 +805,29 @@ class Controller:
             "has_word_sync": data.has_word_sync,
             "pending": False,
             "lines": lines,
-            "line_synced": [{"start": s, "text": t}
-                            for s, t in visible_lines(data.line_synced)],
+            "line_synced": [
+                {
+                    "start": s,
+                    "text": t,
+                    # Absolute NTP wall-clock instant at which the device
+                    # should render this line. timing_offset shifts the
+                    # entire stream; preload_time is the delivery lead,
+                    # NOT subtracted from display_at.
+                    "display_at_epoch_ms": int(
+                        track_anchor_ms + (s + timing_offset) * 1000
+                    ),
+                }
+                for s, t in line_synced
+            ],
             "word_synced": data.word_synced,
             "timing_offset": timing_offset,
             "suppress_lyrics": suppress_lyrics,
+            # NTP-sync metadata for the client. The client subtracts its
+            # local clock from server_time_ms to estimate the offset, then
+            # gates each line on (display_at_epoch_ms - now_server_ms).
+            "server_time_ms": now_ms,
+            "preload_time": preload,
+            "track_anchor_ms": track_anchor_ms,
         }
 
     async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album,
@@ -894,7 +945,8 @@ class Controller:
                 lines = LyricsService.lines_around(cached, position)
                 self._log_line(runtime, name, position, lines.get("current", ""))
                 return self._lyrics_payload(track_id, cached, providers, lines,
-                                            runtime.timing_offset, runtime.suppress_lyrics)
+                                            runtime.timing_offset, runtime.suppress_lyrics,
+                                            track_anchor_ms=_track_anchor_ms(runtime))
             if provider in runtime.lyrics_empty:        # tried, has none -> blank
                 return self._empty_lyrics(track_id, provider=provider,
                                           providers=providers, no_lyrics=True,
@@ -919,7 +971,8 @@ class Controller:
         lines = LyricsService.lines_around(data, position)
         self._log_line(runtime, name, position, lines.get("current", ""))
         return self._lyrics_payload(track_id, data, providers, lines,
-                                    runtime.timing_offset, runtime.suppress_lyrics)
+                                    runtime.timing_offset, runtime.suppress_lyrics,
+                                    track_anchor_ms=_track_anchor_ms(runtime))
 
     async def bad_match(self, param: Optional[str]) -> dict:
         """The user flagged the served lyrics as the wrong version. Re-search with
@@ -1069,6 +1122,18 @@ def create_app(controller: Controller) -> Quart:
     @app.route("/health")
     async def health():
         return jsonify({"status": "ok", "version": VERSION})
+
+    @app.route("/time")
+    async def server_time():
+        # Tiny endpoint used by browsers / ESPHome devices to compute the
+        # offset between their local clock and the server's NTP-synced
+        # clock. Returns both wall-clock ms and the configured preload
+        # window so clients can render a line exactly at its
+        # `display_at_epoch_ms`.
+        return jsonify({
+            "server_time_ms": int(time.time() * 1000),
+            "preload_time": LYRICS["preload_time"],
+        })
 
     @app.route("/players")
     async def players():

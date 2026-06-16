@@ -215,6 +215,10 @@ PLAYERS = {
 # Lyrics display / sync
 # --------------------------------------------------------------------------- #
 
+def _quantise_quarter(value: float) -> float:
+    return round(value * 4) / 4
+
+
 LYRICS = {
     "display": {
         "update_interval": _as_float(conf("lyrics.update_interval", 0.1), 0.1),
@@ -222,7 +226,15 @@ LYRICS = {
         "smart_race_timeout": _as_float(conf("lyrics.smart_race_timeout", 3.0), 3.0),
         "latency_compensation": _as_float(conf("lyrics.latency_compensation", -0.1), -0.1),
         "word_sync_latency_compensation": _as_float(conf("lyrics.word_sync_latency_compensation", -0.1), -0.1),
-    }
+    },
+    # NTP-anchored preload: deliver lyric lines this many seconds AHEAD of
+    # their display moment. Each line's display_at_epoch_ms in /lyrics is
+    # `track_anchor_ms + line.start*1000 + timing_offset_ms` (NOT minus
+    # preload — preload is a delivery lead, not a display shift). Clients
+    # render when their NTP clock reaches display_at_epoch_ms.
+    "preload_time": _quantise_quarter(
+        max(0.0, _as_float(conf("preload_time", 1.0), 1.0))
+    ),
 }
 
 FEATURES = {

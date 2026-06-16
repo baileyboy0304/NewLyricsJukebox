@@ -3,13 +3,15 @@
 // flywheel clock for smooth 3-line lyric sync, renders now-playing + transport,
 // and the player-select modal. No settings UI.
 
-import { Flywheel, activeLineIndex } from './flywheel.js';
+import { Flywheel, activeLineIndex, activeLineIndexByTime, ServerClock } from './flywheel.js';
 
 const POLL_INTERVAL = 100;
 const IDLE_POLL_INTERVAL = 1000;
 const IDLE_THRESHOLD = 20000;
 
 const flywheel = new Flywheel();
+const serverClock = new ServerClock();
+const SERVER_CLOCK_RESYNC_MS = 30000;   // re-sync every 30s to absorb drift
 let selectedPlayer = null;      // null = Auto
 let currentLines = [];          // [{start, text}]
 let lyricStatus = '';           // shown on the center line when no synced lyrics
@@ -69,6 +71,25 @@ function withPlayer(path) {
 const $ = (id) => document.getElementById(id);
 
 // ---------- polling loop ----------
+
+// Sync the local <-> server clock offset. Cheap: one GET /time, sampled
+// every SERVER_CLOCK_RESYNC_MS so drift can't accumulate.
+let lastClockSync = 0;
+async function syncServerClock() {
+  const now = Date.now();
+  if (serverClock.synced && now - lastClockSync < SERVER_CLOCK_RESYNC_MS) return;
+  const sentAt = Date.now();
+  try {
+    const res = await fetch(api('time'), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    const receivedAt = Date.now();
+    if (data && typeof data.server_time_ms === 'number') {
+      serverClock.applySample(sentAt, receivedAt, data.server_time_ms);
+      lastClockSync = receivedAt;
+    }
+  } catch (e) { /* ignore — next loop tick retries */ }
+}
 
 async function fetchJSON(url, options) {
   try {
@@ -190,6 +211,7 @@ async function loop() {
       continue;
     }
     lastCheck = Date.now();
+    syncServerClock();   // fire-and-forget; cheap, gated by resync interval
     const playing = await pollTrack();
     if (playing) {
       idleSince = 0;
@@ -231,7 +253,16 @@ function renderFrame(ts) {
     // Lyrics hidden for this song (thumbs-down). Keep the progress bar updating.
     setLines({ previous: '', current: '', next: '' });
   } else if (currentLines.length) {
-    const idx = activeLineIndex(currentLines, lyricPos);
+    // Prefer NTP-anchored display_at_epoch_ms (the spec): a line becomes
+    // active the moment the server's wall clock reaches its display_at.
+    // Falls back to position-based picking if the payload is older or the
+    // ServerClock hasn't synced yet.
+    let idx = -1;
+    if (serverClock.synced && currentLines[0].display_at_epoch_ms != null) {
+      idx = activeLineIndexByTime(currentLines, serverClock.nowMs());
+    } else {
+      idx = activeLineIndex(currentLines, lyricPos);
+    }
     setLines({
       previous: idx - 1 >= 0 ? currentLines[idx - 1].text : '',
       current: idx >= 0 ? currentLines[idx].text : '',
