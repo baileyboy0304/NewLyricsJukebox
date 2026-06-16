@@ -29,7 +29,8 @@ LEASE_TTL = 6.0
 def _track_anchor_ms(runtime) -> int:
     """Wall-clock epoch-ms at which the current track's playback position
     was 0. Used to compute absolute display_at times for each lyric line:
-    `display_at_ms = anchor_ms + line.start * 1000 + timing_offset_ms`.
+    `display_at_ms = anchor_ms + (line.start - timing_offset) * 1000`
+    (positive timing_offset advances the lyrics, so it subtracts).
 
     Returns the current time if no position has been captured yet, so the
     payload still includes a sane (if conservative) anchor."""
@@ -810,11 +811,14 @@ class Controller:
                     "start": s,
                     "text": t,
                     # Absolute NTP wall-clock instant at which the device
-                    # should render this line. timing_offset shifts the
-                    # entire stream; preload_time is the delivery lead,
-                    # NOT subtracted from display_at.
+                    # should render this line. Positive `timing_offset`
+                    # ADVANCES the lyrics (shows them earlier — matches the
+                    # legacy browser semantics where lyricPos = position +
+                    # offset advanced the lookup), so we SUBTRACT it from
+                    # the display instant. preload_time is the delivery
+                    # lead, NOT subtracted from display_at.
                     "display_at_epoch_ms": int(
-                        track_anchor_ms + (s + timing_offset) * 1000
+                        track_anchor_ms + (s - timing_offset) * 1000
                     ),
                 }
                 for s, t in line_synced
