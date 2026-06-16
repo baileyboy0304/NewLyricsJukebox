@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.71
+
+- **Single-entry source_meta fallback.** Browser tabs that hold a SSRC
+  from before the mic stopped streaming (the mic_required gate stops UDP
+  audio when NLJ has source-meta, which means the stream eventually drops
+  from `udp_capture`) had their `/current-track` polls fall straight to a
+  placeholder — neither the alias lookup nor the stale-SSRC migration
+  could rescue them. The browser rendered blank, even though the bridge
+  was still feeding source-meta under stable aliases on every poll. Now:
+  when no candidate matches but exactly one fresh `source_meta` entry
+  exists system-wide, return it tagged `(source-meta single-fallback)`.
+  Multi-bridge setups deliberately skip this (ambiguous) so cross-talk
+  isn't possible.
+
 ## 1.0.70
 
 - **Log hygiene.** The 1.0.69 `set-source-meta` line fires on every
