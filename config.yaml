@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.71"
+version: "1.0.72"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -61,6 +61,12 @@ options:
   provider_musixmatch: true
   provider_netease: true
   provider_qq: false
+  # --- Lyrics scheduling ---
+  # Seconds NLJ delivers each lyric AHEAD of its display time. Devices
+  # receive a display_at_epoch_ms anchored to NTP and render the line at
+  # that exact moment. Increase if devices show lines late under load,
+  # decrease if memory pressure builds from too many pending lines.
+  preload_time: 1.0
   # --- General ---
   log_level: "INFO"
   players_auto_discover: true
@@ -90,6 +96,7 @@ schema:
   provider_musixmatch: bool
   provider_netease: bool
   provider_qq: bool
+  preload_time: "float(0.0,5.0)"
   log_level: "list(DEBUG|INFO|WARNING|ERROR)"
   players_auto_discover: bool
   players:
