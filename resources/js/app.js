@@ -270,10 +270,35 @@ function renderFrame(ts) {
     });
     if (idx !== lastActiveIdx) {
       lastActiveIdx = idx;
-      nljLog('line', {
-        idx, position: Number(position.toFixed(2)),
-        text: idx >= 0 ? currentLines[idx].text : '(before first line)',
-      });
+      // Render-time diagnostics. `shown_at` is wall-clock when the line
+      // hits the screen (matches the [NLJ HH:MM:SS.mmm] prefix). When
+      // the absolute-time picker drove the swap we also log the line's
+      // scheduled display_at and the skew (shown_at - display_at) so
+      // it can be compared against the bridge / NLJ server logs and the
+      // ESPHome device's own SNTP-fired log line.
+      const line = idx >= 0 ? currentLines[idx] : null;
+      const shownAt = new Date();
+      const shownStr = shownAt.toISOString().slice(11, 23);  // HH:MM:SS.mmm
+      const detail = {
+        idx,
+        position: Number(position.toFixed(2)),
+        text: line ? line.text : '(before first line)',
+        shown_at: shownStr,
+        shown_at_ms: shownAt.getTime(),
+      };
+      if (line && line.display_at_epoch_ms != null) {
+        detail.display_at_ms = line.display_at_epoch_ms;
+        detail.display_at = new Date(line.display_at_epoch_ms)
+          .toISOString().slice(11, 23);
+        // serverClock.nowMs() is our best estimate of the server's wall
+        // clock right now; the skew below is therefore how late/early
+        // we rendered relative to the SCHEDULED instant on server time.
+        detail.skew_ms = Math.round(serverClock.nowMs() - line.display_at_epoch_ms);
+        detail.picker = 'time';
+      } else {
+        detail.picker = 'position';
+      }
+      nljLog('line', detail);
     }
   } else {
     // No synced lyrics: show the status (loading / instrumental / blank). This
