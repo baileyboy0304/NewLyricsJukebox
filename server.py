@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 LEASE_TTL = 6.0
 
 
+# How many consecutive recognizer no-matches before we serve the lyric
+# stream as "silent" — empty lines + a recognition_silent flag. Tuned to
+# blank lyrics WELL BEFORE we blank the now-playing metadata (controlled
+# by blank_after_failures). With the default 4 s recognition interval
+# two misses ≈ 8 s of silence on the mic, which is long enough that a
+# transient miss won't blank the lyrics but short enough that an actual
+# pause / DJ talk doesn't leave the previous line stale on screen.
+LYRIC_SILENCE_THRESHOLD = 2
+
+
 def _track_anchor_ms(runtime) -> int:
     """Wall-clock epoch-ms at which the current track's playback position
     was 0. Used to compute absolute display_at times for each lyric line:
@@ -784,17 +794,37 @@ class Controller:
             "server_time_ms": int(time.time() * 1000),
             "preload_time": LYRICS["preload_time"],
             "track_anchor_ms": None,
+            "recognition_silent": False,
         }
 
+    def _recognition_silent(self, runtime) -> bool:
+        """True when the player is in stream (mic-recognition) mode and the
+        recognizer has missed enough consecutive cycles to suggest the mic
+        isn't actually hearing the song. Clients use this to clear the
+        on-screen lyric line so silence doesn't leave a stale lyric up."""
+        if runtime is None or runtime.mode != "stream" or not runtime.rec_stream:
+            return False
+        rec = self.recognizers.get(runtime.rec_stream)
+        return bool(rec) and rec.failures >= LYRIC_SILENCE_THRESHOLD
+
     def _lyrics_payload(self, track_id, data, providers, lines, timing_offset=0.0,
-                        suppress_lyrics=False, track_anchor_ms=None):
+                        suppress_lyrics=False, track_anchor_ms=None,
+                        recognition_silent=False):
         preload = LYRICS["preload_time"]
         now_ms = int(time.time() * 1000)
         if track_anchor_ms is None:
             # Fallback: anchor is "now minus 0 position" — line scheduling
             # will be approximate. Callers should pass the real anchor.
             track_anchor_ms = now_ms
-        line_synced = list(visible_lines(data.line_synced))
+        # When the mic isn't hearing the song, serve the lines empty AND
+        # blank the 3-line view so clients (browser + ESP via bridge)
+        # clear the stale line immediately. Keep `has_lyrics`/providers
+        # truthful so the +/- and bad-match controls don't disappear.
+        if recognition_silent:
+            lines = {"previous": "", "current": "", "next": ""}
+            line_synced = []
+        else:
+            line_synced = list(visible_lines(data.line_synced))
         return {
             "track_id": track_id,
             "has_lyrics": data.has_lyrics,
@@ -832,6 +862,7 @@ class Controller:
             "server_time_ms": now_ms,
             "preload_time": preload,
             "track_anchor_ms": track_anchor_ms,
+            "recognition_silent": bool(recognition_silent),
         }
 
     async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album,
@@ -950,7 +981,8 @@ class Controller:
                 self._log_line(runtime, name, position, lines.get("current", ""))
                 return self._lyrics_payload(track_id, cached, providers, lines,
                                             runtime.timing_offset, runtime.suppress_lyrics,
-                                            track_anchor_ms=_track_anchor_ms(runtime))
+                                            track_anchor_ms=_track_anchor_ms(runtime),
+                                            recognition_silent=self._recognition_silent(runtime))
             if provider in runtime.lyrics_empty:        # tried, has none -> blank
                 return self._empty_lyrics(track_id, provider=provider,
                                           providers=providers, no_lyrics=True,
@@ -976,7 +1008,8 @@ class Controller:
         self._log_line(runtime, name, position, lines.get("current", ""))
         return self._lyrics_payload(track_id, data, providers, lines,
                                     runtime.timing_offset, runtime.suppress_lyrics,
-                                    track_anchor_ms=_track_anchor_ms(runtime))
+                                    track_anchor_ms=_track_anchor_ms(runtime),
+                                    recognition_silent=self._recognition_silent(runtime))
 
     async def bad_match(self, param: Optional[str]) -> dict:
         """The user flagged the served lyrics as the wrong version. Re-search with

@@ -233,6 +233,14 @@ class PlayerRecognizer:
     def is_playing(self) -> bool:
         return not self._paused and self._current is not None
 
+    @property
+    def failures(self) -> int:
+        """Consecutive no-match recognitions on this stream. Reset to 0
+        on every successful match. Exposed so the lyrics layer can blank
+        the served line earlier than the metadata-blank threshold —
+        silence on the mic shouldn't keep yesterday's lyric on screen."""
+        return self._failures
+
     def get_position(self) -> Optional[float]:
         if self._current is None:
             return None
