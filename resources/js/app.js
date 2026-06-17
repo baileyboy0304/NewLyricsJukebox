@@ -25,6 +25,7 @@ let lyricProviders = [];         // providers that returned lyrics for this song
 let currentLyricProvider = null; // provider currently shown
 let chosenProvider = null;       // user pick via +/- (null = auto best)
 let hasLyrics = false;           // whether the current song has any lyrics
+let recognitionSilent = false;   // mic isn't hearing audio -> blank lyric line
 let flashUntil = 0;              // suppress provider-text updates until this ts (ms)
 
 // Manual lyric-timing offset (seconds). +offset ADVANCES lyrics (shows earlier),
@@ -167,8 +168,15 @@ async function pollLyrics() {
   if (data.track_id && data.track_id !== currentTrackId) return; // stale
   const lines = data.line_synced || [];
   const had = currentLines.length;
+  const wasSilent = recognitionSilent;
+  recognitionSilent = !!data.recognition_silent;
   currentLines = lines;
-  if (lines.length) {
+  if (recognitionSilent) {
+    // Mic isn't hearing the song — server has blanked line_synced; we
+    // also wipe the on-screen status string so nothing stale lingers.
+    lyricStatus = '';
+    if (!wasSilent) nljLog('silent', { reason: 'recognition_silent' });
+  } else if (lines.length) {
     lyricStatus = '';
   } else if (data.is_instrumental) {
     lyricStatus = '♪ Instrumental ♪';
@@ -249,8 +257,9 @@ function renderFrame(ts) {
   // below stay on the true audio position. +offset ADVANCES the lyrics (looks
   // ahead in the song), -offset delays them.
   const lyricPos = position + lyricOffset;
-  if (suppressLyrics) {
-    // Lyrics hidden for this song (thumbs-down). Keep the progress bar updating.
+  if (suppressLyrics || recognitionSilent) {
+    // Lyrics hidden either because the user thumbs-down'd the song or
+    // because the mic isn't hearing audio (server-flagged silence).
     setLines({ previous: '', current: '', next: '' });
   } else if (currentLines.length) {
     // Prefer NTP-anchored display_at_epoch_ms (the spec): a line becomes
