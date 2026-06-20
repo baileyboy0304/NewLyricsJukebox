@@ -266,6 +266,77 @@ def test_same_recording_ignores_version_noise():
     assert _same_recording(a, c) is False
 
 
+def test_same_song_ignores_artist_punctuation():
+    """The REM case: Shazam alternates "Rem" and "R.E.M." for the same audio.
+    The punctuation-insensitive artist key must treat both as the same song."""
+    from recognition.engine import _same_song
+    a = make(10, 0, title="Near Wild Heaven", artist="Rem")
+    b = make(10, 0, title="Near Wild Heaven", artist="R.E.M.")
+    assert _same_song(a, b) is True
+    assert _same_song(b, a) is True
+
+
+def test_same_song_uses_isrc_when_present():
+    """Matching ISRC is conclusive even if the artist/title strings drift."""
+    from recognition.engine import _same_song
+    a = make(10, 0, title="Whatever", artist="Some Artist")
+    b = make(10, 0, title="Different Label", artist="Compilation Tag")
+    a.isrc = "USRC12345678"
+    b.isrc = "USRC12345678"
+    assert _same_song(a, b) is True
+
+
+def test_same_recording_ignores_artist_punctuation():
+    """Stops ACR refinements being thrown away when Shazam says 'Rem' and
+    ACRCloud says 'R.E.M.' for the same recording."""
+    from recognition.engine import _same_recording
+    a = make(10, 0, title="Near Wild Heaven", artist="Rem")
+    b = make(10, 0, title="Near Wild Heaven", artist="R.E.M.")
+    assert _same_recording(a, b) is True
+
+
+def test_artist_mismatch_with_continuous_position_is_same_song():
+    """The Michael Jackson case: Shazam drops a compilation tag
+    ('Lo Mejor Del Pop, Vol. 17') as the artist for one cycle mid-song. Same title
+    + an anchor right on the locked baseline -> same song, not a track change."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        # Establish baseline: capture at t=1000, song position 20s -> anchor -980.
+        await rec._handle_success(
+            make(20, 1000.0, title="Man In the Mirror (2003 Edit)",
+                 artist="Michael Jackson"))
+        held = rec._current
+        # Garbage artist, same title, capture 14s later, song advanced ~14s ->
+        # anchor still ~-980 (within tolerance).
+        await rec._handle_success(
+            make(34, 1014.0, title="Man In The Mirror",
+                 artist="Lo Mejor Del Pop, Vol. 17 & Vol. 17"))
+        # Held title/artist preserved, NOT treated as a song change.
+        assert rec._current.title == held.title
+        assert rec._current.artist == held.artist
+
+    asyncio.run(scenario())
+
+
+def test_artist_mismatch_with_discontinuous_position_is_a_new_song():
+    """A real different song by a different artist (anchor far from baseline) is
+    still detected as a track change."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        await rec._handle_success(
+            make(20, 1000.0, title="Some Song", artist="Artist A"))
+        # New artist, same title coincidence, anchor jumps by ~100s.
+        await rec._handle_success(
+            make(120, 1000.0, title="Some Song", artist="Artist B"))
+        assert rec._current.artist == "Artist B"   # treated as a real change
+
+    asyncio.run(scenario())
+
+
 def test_same_song_ignores_version_suffix_churn():
     """Shazam flip-flops the title for the same audio (Babylon / Babylon (UK Radio
     Mix), Angels / Angels (Remastered 2004), ...). Those must NOT count as a song

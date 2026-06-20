@@ -13,6 +13,7 @@ fallback, so a no-match (advert / DJ talk / silence) never spends a credit.
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import replace
 from typing import Callable, Optional
@@ -31,42 +32,62 @@ _PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 # cycle. Shazam is normally <3s and the whole chain well under this.
 RECOGNIZE_TIMEOUT = 10.0
 
+# Anchor-continuity window (seconds) for the title-only fallback in _same_song:
+# a same-titled read whose sync anchor sits this close to the locked baseline is
+# treated as the same song even when the artist string differs wildly (compilation
+# metadata, etc.). Different songs effectively never share a continuous anchor.
+SAME_SONG_ANCHOR_TOLERANCE = 10.0
+
+_NON_ALNUM_RE = re.compile(r"[^\w]+", re.UNICODE)
+
+
+def _norm_artist(s: Optional[str]) -> str:
+    """Punctuation-insensitive artist key: "R.E.M.", "R E M" and "Rem" all collapse
+    to "rem", so a Shazam flip between those labels is no longer a song change."""
+    return _NON_ALNUM_RE.sub("", (s or "").strip().lower())
+
+
+def _norm_title(s: Optional[str]) -> str:
+    """Version-noise + punctuation stripped title key."""
+    return _NON_ALNUM_RE.sub("", strip_version_noise((s or "").strip().lower()))
+
 
 def _same_recording(a: RecognitionResult, b: RecognitionResult) -> bool:
     """Looser track equality used only by the ACR refinement. Shazam and ACRCloud
     routinely label the same recording differently — e.g. "It Must Have Been Love"
     vs "... (From the Film 'Pretty Woman')", or "Lady Love Me (One More Time)" vs
-    "Lady Love Me (2003 Remaster)". Version noise (remaster/edit/live/...) is
-    stripped from BOTH titles first, then they match if the artist is equal and one
-    cleaned title is a prefix of the other — so a valid position + Spotify id isn't
-    thrown away over a variant label. (RecognitionResult.is_same_song stays strict
-    for the main song-change detection.)"""
-    na = (a.artist or "").strip().lower()
-    nb = (b.artist or "").strip().lower()
+    "Lady Love Me (2003 Remaster)". A matching ISRC is conclusive; otherwise
+    artists are compared punctuation-insensitively (so "Rem" / "R.E.M." agree) and
+    the cleaned titles must be equal or a prefix of one another — so a valid
+    position + Spotify id isn't thrown away over a variant label."""
+    if a.isrc and b.isrc and a.isrc == b.isrc:
+        return True
+    na, nb = _norm_artist(a.artist), _norm_artist(b.artist)
     if not na or na != nb:
         return False
-    ta = strip_version_noise((a.title or "").strip().lower())
-    tb = strip_version_noise((b.title or "").strip().lower())
+    ta, tb = _norm_title(a.title), _norm_title(b.title)
     return bool(ta and tb) and (ta == tb or ta.startswith(tb) or tb.startswith(ta))
 
 
 def _same_song(a: RecognitionResult, b: Optional[RecognitionResult]) -> bool:
-    """Song-change detection that ignores version-suffix churn. Shazam frequently
-    returns two titles for the SAME audio on alternating cycles — e.g. "Babylon"
-    and "Babylon (UK Radio Mix)", "Angels" and "Angels (Remastered 2004)", "Live
-    It Up (Remastered)" vs "(Acoustic)". The strict title check treated each flip
-    as a brand-new song: it reset the position lock every few seconds (a visible
+    """Song-change detection that ignores version-suffix churn AND the punctuation
+    flips Shazam frequently introduces ("Rem" vs "R.E.M.", "Babylon" vs
+    "Babylon (UK Radio Mix)"). The strict title check treated each flip as a
+    brand-new song: it reset the position lock every few seconds (a visible
     "shudder" as the lyrics jumped) AND spent an ACR credit each time (burning the
-    daily quota). Two reads are the same song when the artist matches and the
-    titles are equal once version noise (mix/edit/remaster/live/...) is stripped."""
+    daily quota). A matching ISRC is conclusive; otherwise two reads are the same
+    song when the punctuation-insensitive artist matches and the cleaned titles
+    are equal. (The artist-mismatch case — e.g. a compilation tag like
+    "Lo Mejor Del Pop, Vol. 17" appearing for one cycle of Michael Jackson — is
+    handled in _handle_success via the lock's position-continuity guard.)"""
     if b is None:
         return False
-    na = (a.artist or "").strip().lower()
-    nb = (b.artist or "").strip().lower()
+    if a.isrc and b.isrc and a.isrc == b.isrc:
+        return True
+    na, nb = _norm_artist(a.artist), _norm_artist(b.artist)
     if not na or na != nb:
         return False
-    return (strip_version_noise((a.title or "").strip().lower())
-            == strip_version_noise((b.title or "").strip().lower()))
+    return _norm_title(a.title) == _norm_title(b.title)
 
 
 class LockTracker:
@@ -114,6 +135,12 @@ class LockTracker:
     @property
     def locked(self) -> bool:
         return self.enabled and self.confirmations >= self.lock_after
+
+    @property
+    def baseline(self) -> Optional[float]:
+        """Current accepted sync anchor (offset - capture_start_time), or None
+        before the first read."""
+        return self._baseline
 
     def offer(self, result: RecognitionResult) -> str:
         """Feed a same-song recognition; returns its lock status (see class doc)."""
@@ -311,6 +338,20 @@ class PlayerRecognizer:
         self._failures = 0
         self._paused = False
         new_song = not _same_song(result, self._current)
+        if new_song and self._current is not None and self._lock.baseline is not None:
+            # Artist string differs (Shazam sometimes returns a compilation tag like
+            # "Lo Mejor Del Pop, Vol. 17" for one cycle in the middle of a Michael
+            # Jackson run). Fall back to title + position continuity: if the cleaned
+            # titles agree AND the new read's sync anchor sits right on the locked
+            # baseline, it's the same song with bad metadata, not a track change.
+            if (_norm_title(result.title) == _norm_title(self._current.title)
+                    and abs((result.offset - result.capture_start_time)
+                            - self._lock.baseline) <= SAME_SONG_ANCHOR_TOLERANCE):
+                logger.info(
+                    "Treating %s - %s as same song (title + position match; "
+                    "artist '%s' differs from held '%s')",
+                    result.artist, result.title, result.artist, self._current.artist)
+                new_song = False
         if new_song:
             self._lock.reset()
             self._acr_anchored = False
