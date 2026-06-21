@@ -197,7 +197,7 @@ class MusicAssistant:
 
         # Identity + timeline: prefer the live queue item, fall back to the
         # player's current_media (external streams).
-        title = artist = album = image_url = media_type = None
+        title = artist = album = image_url = media_type = track_uri = None
         duration_ms = None
         position = 0.0
         position_last_updated = now()
@@ -212,6 +212,7 @@ class MusicAssistant:
             album_obj = getattr(media_item, "album", None)
             album = getattr(album_obj, "name", None) if album_obj else None
             item_media_type = _state_str(getattr(media_item, "media_type", None))
+            track_uri = getattr(media_item, "uri", None) or track_uri
         current_media = getattr(player, "current_media", None)
         if current_media is not None:
             title = title or getattr(current_media, "title", None)
@@ -219,6 +220,7 @@ class MusicAssistant:
             album = album or getattr(current_media, "album", None)
             image_url = getattr(current_media, "image_url", None)
             current_media_type = _state_str(getattr(current_media, "media_type", None))
+            track_uri = track_uri or getattr(current_media, "uri", None)
         # Radio wins over an enriched track type (see _coalesce_media_type).
         media_type = _coalesce_media_type(item_media_type, current_media_type)
 
@@ -256,6 +258,7 @@ class MusicAssistant:
             active_source_id=active_source_id,
             active_source_name=active_source_name,
             position_last_updated=position_last_updated,
+            track_uri=track_uri,
         )
 
     # -- transport --------------------------------------------------------- #
@@ -275,6 +278,77 @@ class MusicAssistant:
     async def play_pause(self, player_id): return await self._player_cmd("play_pause", player_id)
     async def next(self, player_id):     return await self._player_cmd("next", player_id)
     async def previous(self, player_id): return await self._player_cmd("previous", player_id)
+
+    # -- playlists --------------------------------------------------------- #
+
+    async def add_to_playlist(
+        self,
+        track_uri: Optional[str],
+        artist: Optional[str],
+        title: Optional[str],
+        playlist_name: str = "Discovered Tracks",
+        provider: str = "spotify",
+    ) -> dict:
+        """Add a track to the named playlist on the given provider, creating
+        the playlist if it doesn't exist. If ``track_uri`` is missing we search
+        the provider for ``artist + title`` and use the top hit. Returns a dict
+        with ``ok`` plus diagnostic fields."""
+        if not self._client:
+            return {"ok": False, "error": "not connected to music assistant"}
+        try:
+            music = self._client.music
+            # Resolve the track URI on the target provider when we don't already
+            # have one (recognition-driven tracks have only title/artist).
+            uri = track_uri
+            if not uri:
+                if not (title and artist):
+                    return {"ok": False, "error": "no track identified"}
+                try:
+                    from music_assistant_models.enums import MediaType
+                    media_types = [MediaType.TRACK]
+                except Exception:  # noqa: BLE001
+                    media_types = None
+                query = f"{artist} {title}"
+                kwargs = {"search_query": query, "limit": 5, "provider": provider}
+                if media_types is not None:
+                    kwargs["media_types"] = media_types
+                results = await music.search(**kwargs)
+                tracks = getattr(results, "tracks", None) or []
+                if not tracks:
+                    return {"ok": False, "error": f"no {provider} match for track"}
+                uri = tracks[0].uri
+            # Find or create the playlist on the requested provider.
+            playlist = None
+            try:
+                playlists = await music.get_library_playlists(
+                    search=playlist_name, provider=provider)
+            except TypeError:
+                playlists = await music.get_library_playlists()
+            for p in playlists or []:
+                if (getattr(p, "name", None) or "").lower() != playlist_name.lower():
+                    continue
+                for pm in getattr(p, "provider_mappings", []) or []:
+                    if (getattr(pm, "provider_domain", None) == provider
+                            or getattr(pm, "provider_instance", None) == provider):
+                        playlist = p
+                        break
+                if playlist:
+                    break
+            created = False
+            if playlist is None:
+                playlist = await music.create_playlist(
+                    playlist_name, provider_instance_or_domain=provider)
+                created = True
+            if playlist is None:
+                return {"ok": False, "error": "could not create playlist"}
+            await music.add_playlist_tracks(playlist.item_id, [uri])
+            logger.info("Added %r to playlist %r (created=%s, uri=%s)",
+                        title, playlist_name, created, uri)
+            return {"ok": True, "uri": uri, "playlist": playlist_name,
+                    "created": created}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("add_to_playlist failed: %s", exc)
+            return {"ok": False, "error": str(exc)}
 
     async def seek(self, player_id, position_ms: int):
         """Seek — queue mode only. MA's queue seek takes seconds."""

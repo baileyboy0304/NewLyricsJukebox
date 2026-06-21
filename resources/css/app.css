@@ -244,6 +244,38 @@ body {
   stroke: #fff;
 }
 
+/* "Add to Spotify Discovered Tracks": round Spotify-logo button positioned in
+   the gap between the centred transport controls and the right-hand lyrics
+   provider cycle, anchored toward the bottom of the row. */
+.spotify-btn {
+  position: absolute;
+  right: 9rem;
+  bottom: -0.5rem;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #000;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s ease, filter 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.spotify-btn svg { width: 36px; height: 36px; display: block; }
+.spotify-btn:hover { filter: brightness(1.1); }
+.spotify-btn:active { transform: scale(0.94); }
+.spotify-btn.saved { box-shadow: 0 0 0 2px #1DB954; }
+.spotify-btn.flash { animation: spot-flash 0.6s ease; }
+@keyframes spot-flash {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+.spotify-btn.hidden { display: none; }
+
 /* Speaker / player-select chip — mirrors the Music Assistant player. */
 .speaker-bar {
   display: flex;

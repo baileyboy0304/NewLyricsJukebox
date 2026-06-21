@@ -126,6 +126,7 @@ async function pollTrack() {
     currentLyricProvider = null;
     hasLyrics = false;
     $('btn-bad-match').classList.remove('active');  // reset wrong-version state
+    $('btn-spotify').classList.remove('saved');     // new song -> "save" reset
     lyricOffset = 0;                 // new song -> default timing until remembered value loads
     offsetTrackId = null;
     updateSyncDisplay();
@@ -477,6 +478,34 @@ function cycleProvider(dir) {
   }
 }
 
+// ---------- "Add to Spotify Discovered Tracks" ----------
+
+let lastSavedTrackId = null;
+
+async function saveToSpotify() {
+  const btn = $('btn-spotify');
+  if (!btn || btn.disabled) return;
+  if (!currentTrackId) {
+    nljLog('spotify-save', { skipped: 'no track' });
+    return;
+  }
+  btn.disabled = true;
+  const res = await fetchJSON(withPlayer('add-to-playlist'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+  });
+  btn.disabled = false;
+  if (res && res.ok) {
+    lastSavedTrackId = currentTrackId;
+    btn.classList.add('saved', 'flash');
+    setTimeout(() => btn.classList.remove('flash'), 700);
+    nljLog('spotify-save', { ok: true, created: !!res.created, uri: res.uri });
+  } else {
+    btn.classList.add('flash');
+    setTimeout(() => btn.classList.remove('flash'), 700);
+    nljLog('spotify-save', { ok: false, error: res && res.error });
+  }
+}
+
 // ---------- transport ----------
 
 async function transport(action, extra) {
@@ -589,6 +618,7 @@ function init() {
   $('btn-prov-prev').onclick = () => cycleProvider(-1);
   $('btn-prov-next').onclick = () => cycleProvider(1);
   $('btn-bad-match').onclick = badMatch;
+  $('btn-spotify').onclick = saveToSpotify;
   $('btn-suppress').onclick = toggleSuppress;
   $('btn-sync-minus').onclick = () => adjustOffset(-1);  // lyrics later (delay)
   $('btn-sync-plus').onclick = () => adjustOffset(1);    // lyrics earlier (advance)
