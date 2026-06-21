@@ -536,6 +536,7 @@ class Controller:
             "duration_ms": state.duration_ms,
             "is_playing": state.is_playing,
             "seekable": mode == "queue",
+            "uri": state.track_uri,
         }
         track["track_id"] = f"{track.get('artist')}|{track.get('title')}"
         return track
@@ -1123,6 +1124,27 @@ class Controller:
         playing = self.ma.find_playing_player_id()
         return playing if playing in players else None
 
+    async def add_to_discovered(self, param: Optional[str],
+                                 playlist_name: str = "Discovered Tracks",
+                                 provider: str = "spotify") -> dict:
+        """Add the player's currently-playing track to a Spotify playlist on
+        Music Assistant (creates the playlist on first use). Falls back to a
+        provider search by title/artist for recognition-driven tracks that
+        don't carry a MA URI."""
+        if not (self.ma and self.ma.connected):
+            return {"ok": False, "error": "no music assistant"}
+        key, _ma_id, _stream_key, _name = self._resolve(param)
+        runtime = self.runtimes.get(key)
+        if runtime is None or not runtime.track:
+            return {"ok": False, "error": "no track identified"}
+        track = runtime.track
+        if not track.get("title"):
+            return {"ok": False, "error": "no track identified"}
+        return await self.ma.add_to_playlist(
+            track.get("uri"), track.get("artist"), track.get("title"),
+            playlist_name=playlist_name, provider=provider,
+        )
+
     async def transport(self, param: Optional[str], action: str, position_ms=None) -> dict:
         key, ma_id, stream_key, _ = self._resolve(param)
         ma_id = self._live_ma_player_id(ma_id, stream_key)
@@ -1223,6 +1245,14 @@ def create_app(controller: Controller) -> Quart:
             request.args.get("player") or body.get("player"),
             bool(body.get("suppress", True))))
 
+    @app.route("/add-to-playlist", methods=["POST"])
+    async def add_to_playlist():
+        body = await request.get_json(silent=True) or {}
+        result = await controller.add_to_discovered(
+            request.args.get("player") or body.get("player"),
+        )
+        return jsonify(result)
+
     @app.route("/transport", methods=["POST"])
     async def transport():
         body = await request.get_json(silent=True) or {}
@@ -1244,7 +1274,8 @@ def create_app(controller: Controller) -> Quart:
     @app.after_request
     async def cache_headers(response):
         if request.path in ("/", "/current-track", "/lyrics", "/players",
-                            "/bad-match", "/lyric-offset", "/suppress-lyrics"):
+                            "/bad-match", "/lyric-offset", "/suppress-lyrics",
+                            "/add-to-playlist"):
             response.headers["Cache-Control"] = "no-store"
         elif request.path.startswith("/static/"):
             # Revalidate static assets so a rebuilt add-on always serves fresh

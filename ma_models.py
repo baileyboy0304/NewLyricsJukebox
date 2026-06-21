@@ -26,6 +26,10 @@ class PlayerState:
     active_source_id: Optional[str] = None
     active_source_name: Optional[str] = None
     position_last_updated: float = 0.0
+    # MA URI of the currently-playing track ("spotify://track/..." or
+    # "library://track/..."). Captured so /add-to-playlist can add the
+    # current track to a Spotify playlist without re-searching.
+    track_uri: Optional[str] = None
 
     @property
     def is_playing(self) -> bool:
