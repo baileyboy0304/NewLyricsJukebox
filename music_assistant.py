@@ -8,13 +8,16 @@ control (play/pause/next/previous/seek). Uses the official
 """
 
 import asyncio
+import json
 import logging
 from typing import List, Optional
 
-from config import MUSIC_ASSISTANT
+from config import MUSIC_ASSISTANT, STATE_DIR
 from ma_models import PlayerState, now
 
 logger = logging.getLogger(__name__)
+
+_PLAYLIST_CACHE_FILE = STATE_DIR / "discovered_playlist.json"
 
 
 def _state_str(value) -> str:
@@ -47,11 +50,25 @@ class MusicAssistant:
         self.preferred_player_id = MUSIC_ASSISTANT["player_id"] or None
         self._client = None
         self._listen_task = None
-        # (provider, playlist_name_lower) -> (item_id, provider_instance_or_domain).
-        # Populated on first lookup / creation so repeated "save to discovered"
-        # presses don't keep creating duplicate playlists when MA's library
-        # listing is slow to surface a freshly-created Spotify playlist.
-        self._playlist_cache: dict = {}
+        # "{provider}:{name_lower}" -> item_id. Persisted to disk so a restart
+        # doesn't re-create the playlist, and trusted absolutely once set
+        # (don't re-verify against MA — that's what was creating duplicates
+        # whenever the verification call hiccuped). Cache invalidates only
+        # when add_playlist_tracks itself fails on the cached id.
+        self._playlist_cache: dict = self._load_playlist_cache()
+
+    @staticmethod
+    def _load_playlist_cache() -> dict:
+        try:
+            return json.loads(_PLAYLIST_CACHE_FILE.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _save_playlist_cache(self) -> None:
+        try:
+            _PLAYLIST_CACHE_FILE.write_text(json.dumps(self._playlist_cache))
+        except OSError as exc:
+            logger.warning("playlist cache write failed: %s", exc)
 
     @property
     def connected(self) -> bool:
@@ -286,6 +303,24 @@ class MusicAssistant:
 
     # -- playlists --------------------------------------------------------- #
 
+    @staticmethod
+    async def _list_library_playlists(music, name, provider):
+        """Best-effort wrapper around get_library_playlists() that tolerates
+        client version drift (the search/provider kwargs aren't always
+        accepted)."""
+        for kwargs in ({"search": name, "provider": provider},
+                       {"search": name},
+                       {}):
+            try:
+                return await music.get_library_playlists(**kwargs)
+            except TypeError:
+                continue
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("get_library_playlists(%s) failed: %s", kwargs, exc)
+                return []
+        return []
+
+
     async def add_to_playlist(
         self,
         track_uri: Optional[str],
@@ -334,78 +369,57 @@ class MusicAssistant:
                 if picked is None:
                     return {"ok": False, "error": f"no match for track"}
                 uri = picked.uri
-            # Find or create the playlist on the requested provider. Prefer the
-            # in-memory cache (avoids hitting MA's library listing on every
-            # press); if it's empty, list library playlists and match by name
-            # only (provider_mappings on a freshly-created playlist sometimes
-            # don't carry the bare provider domain we'd filter on, which is
-            # what was leading to duplicates being created on every click).
-            playlist = None
-            cache_key = (provider, playlist_name.lower())
-            cached = self._playlist_cache.get(cache_key)
-            if cached:
-                try:
-                    cached_item_id, cached_provider = cached
-                    playlist = await music.get_playlist(cached_item_id, cached_provider)
-                except Exception:  # noqa: BLE001
-                    playlist = None
-                    self._playlist_cache.pop(cache_key, None)
-            if playlist is None:
-                try:
-                    playlists = await music.get_library_playlists(
-                        search=playlist_name, provider=provider)
-                except TypeError:
-                    playlists = await music.get_library_playlists()
-                for p in playlists or []:
-                    if (getattr(p, "name", None) or "").lower() != playlist_name.lower():
-                        continue
-                    # Accept any provider mapping that looks like Spotify
-                    # (provider_domain "spotify", provider_instance "spotify_xxx",
-                    # …). We only fall back to "no mapping match" if the playlist
-                    # has mappings AND none of them mention the provider — a
-                    # library playlist with no mappings yet still counts.
-                    mappings = list(getattr(p, "provider_mappings", []) or [])
-                    if mappings and not any(
-                        provider in (getattr(pm, "provider_domain", "") or "").lower()
-                        or provider in (getattr(pm, "provider_instance", "") or "").lower()
-                        for pm in mappings
-                    ):
-                        continue
-                    playlist = p
-                    break
+            # Resolve the playlist. Order of precedence:
+            #   1. On-disk cache (item_id from a previous resolve / create).
+            #      Trusted absolutely — if it points at a now-deleted playlist,
+            #      add_playlist_tracks fails and we drop it and retry once.
+            #   2. MA library listing, matching by name only (case-insensitive)
+            #      so a playlist already in the library is reused even if its
+            #      provider_mappings don't expose the bare "spotify" domain.
+            #   3. create_playlist() + add_item_to_library() — only reached
+            #      when neither cache nor library knew about it.
+            cache_key = f"{provider}:{playlist_name.lower()}"
+            playlist_id = self._playlist_cache.get(cache_key)
             created = False
-            if playlist is None:
+            if playlist_id is None:
+                playlists = await self._list_library_playlists(music, playlist_name, provider)
+                match = next(
+                    (p for p in playlists
+                     if (getattr(p, "name", None) or "").lower() == playlist_name.lower()),
+                    None,
+                )
+                if match is not None:
+                    playlist_id = match.item_id
+                    self._playlist_cache[cache_key] = playlist_id
+                    self._save_playlist_cache()
+                    logger.info("Reusing existing playlist %r (item_id=%s)",
+                                playlist_name, playlist_id)
+            if playlist_id is None:
                 playlist = await music.create_playlist(
                     playlist_name, provider_instance_or_domain=provider)
+                if playlist is None:
+                    return {"ok": False, "error": "could not create playlist"}
+                playlist_id = playlist.item_id
                 created = True
-                # Ensure the created playlist appears in subsequent
-                # get_library_playlists() calls so a restarted add-on (empty
-                # in-memory cache) still finds it instead of creating again.
-                if playlist is not None:
-                    try:
-                        await music.add_item_to_library(playlist)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug("add_item_to_library failed: %s", exc)
-            if playlist is None:
-                return {"ok": False, "error": "could not create playlist"}
-            # Pick the provider mapping that matches our target provider so
-            # add_playlist_tracks targets the Spotify-side playlist (not a
-            # cached library id from another provider).
-            pl_item_id = playlist.item_id
-            pl_provider = provider
-            for pm in getattr(playlist, "provider_mappings", []) or []:
-                domain = (getattr(pm, "provider_domain", "") or "").lower()
-                instance = (getattr(pm, "provider_instance", "") or "").lower()
-                if provider in domain or provider in instance:
-                    pl_item_id = getattr(pm, "item_id", pl_item_id)
-                    pl_provider = (
-                        getattr(pm, "provider_instance", None)
-                        or getattr(pm, "provider_domain", None)
-                        or provider
-                    )
-                    break
-            self._playlist_cache[cache_key] = (playlist.item_id, pl_provider)
-            await music.add_playlist_tracks(playlist.item_id, [uri])
+                self._playlist_cache[cache_key] = playlist_id
+                self._save_playlist_cache()
+                # Get the playlist into MA's library so a future lookup (after
+                # the cache file is wiped) finds it instead of creating again.
+                try:
+                    await music.add_item_to_library(playlist)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("add_item_to_library failed: %s", exc)
+                logger.info("Created playlist %r (item_id=%s)", playlist_name, playlist_id)
+            try:
+                await music.add_playlist_tracks(playlist_id, [uri])
+            except Exception as exc:  # noqa: BLE001
+                # Cached id is stale (playlist deleted on Spotify). Drop the
+                # cache and let the next press re-resolve / re-create.
+                logger.warning("add_playlist_tracks failed on cached id %s: %s",
+                               playlist_id, exc)
+                self._playlist_cache.pop(cache_key, None)
+                self._save_playlist_cache()
+                return {"ok": False, "error": f"add failed: {exc}"}
             logger.info("Added %r to playlist %r (created=%s, uri=%s)",
                         title, playlist_name, created, uri)
             return {"ok": True, "uri": uri, "playlist": playlist_name,
