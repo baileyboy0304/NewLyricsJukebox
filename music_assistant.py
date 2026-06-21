@@ -309,14 +309,26 @@ class MusicAssistant:
                 except Exception:  # noqa: BLE001
                     media_types = None
                 query = f"{artist} {title}"
-                kwargs = {"search_query": query, "limit": 5, "provider": provider}
+                kwargs = {"search_query": query, "limit": 5}
                 if media_types is not None:
                     kwargs["media_types"] = media_types
                 results = await music.search(**kwargs)
-                tracks = getattr(results, "tracks", None) or []
-                if not tracks:
-                    return {"ok": False, "error": f"no {provider} match for track"}
-                uri = tracks[0].uri
+                tracks = list(getattr(results, "tracks", None) or [])
+                # Prefer a hit that's already on the target provider so we add
+                # the Spotify-native URI; otherwise fall back to the top hit
+                # and let MA resolve the cross-provider add.
+                def on_provider(t):
+                    for pm in getattr(t, "provider_mappings", []) or []:
+                        if (getattr(pm, "provider_domain", None) == provider
+                                or getattr(pm, "provider_instance", None) == provider):
+                            return True
+                    return False
+                picked = next((t for t in tracks if on_provider(t)), None)
+                if picked is None and tracks:
+                    picked = tracks[0]
+                if picked is None:
+                    return {"ok": False, "error": f"no match for track"}
+                uri = picked.uri
             # Find or create the playlist on the requested provider.
             playlist = None
             try:
