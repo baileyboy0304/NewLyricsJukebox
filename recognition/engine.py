@@ -32,12 +32,6 @@ _PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 # cycle. Shazam is normally <3s and the whole chain well under this.
 RECOGNIZE_TIMEOUT = 10.0
 
-# Anchor-continuity window (seconds) for the title-only fallback in _same_song:
-# a same-titled read whose sync anchor sits this close to the locked baseline is
-# treated as the same song even when the artist string differs wildly (compilation
-# metadata, etc.). Different songs effectively never share a continuous anchor.
-SAME_SONG_ANCHOR_TOLERANCE = 10.0
-
 _NON_ALNUM_RE = re.compile(r"[^\w]+", re.UNICODE)
 
 
@@ -346,17 +340,21 @@ class PlayerRecognizer:
         self._failures = 0
         self._paused = False
         new_song = not _same_song(result, self._current)
-        if new_song and self._current is not None and self._lock.baseline is not None:
-            # Artist string differs (Shazam sometimes returns a compilation tag like
-            # "Lo Mejor Del Pop, Vol. 17" for one cycle in the middle of a Michael
-            # Jackson run). Fall back to title + position continuity: if the cleaned
-            # titles agree AND the new read's sync anchor sits right on the locked
-            # baseline, it's the same song with bad metadata, not a track change.
-            if (_norm_title(result.title) == _norm_title(self._current.title)
-                    and abs((result.offset - result.capture_start_time)
-                            - self._lock.baseline) <= SAME_SONG_ANCHOR_TOLERANCE):
+        if new_song and self._current is not None:
+            # Title-only fallback. When the artist string flips between
+            # cycles (Shazam returning "Haloca" mid-Luther run, etc.) the
+            # offset/anchor reported by Shazam is from THAT match's
+            # reference recording — not Luther's — so the locked baseline
+            # comparison can't reconcile them. Title alone is the strongest
+            # signal we have: same normalised title -> same song, full
+            # stop. The cost of a false merge here (a real next-track that
+            # happens to share a name) is the lyric position briefly being
+            # wrong until the lock catches up; the cost of NOT merging is
+            # artwork + metadata flapping every few seconds, which the user
+            # sees as unacceptable churn.
+            if _norm_title(result.title) == _norm_title(self._current.title):
                 logger.info(
-                    "Treating %s - %s as same song (title + position match; "
+                    "Treating %s - %s as same song (title match; "
                     "artist '%s' differs from held '%s')",
                     result.artist, result.title, result.artist, self._current.artist)
                 new_song = False
