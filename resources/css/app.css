@@ -254,8 +254,8 @@ body {
   left: 75%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   background: none;
   border: none;
   padding: 0;
@@ -266,7 +266,16 @@ body {
   transition: filter 0.15s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.spotify-btn img { width: 44px; height: 44px; display: block; }
+.spotify-btn:focus,
+.spotify-btn:focus-visible { outline: none; }
+.spotify-btn img {
+  width: 56px;
+  height: 56px;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
 .spotify-btn:hover { filter: brightness(1.1); }
 .spotify-btn:active { transform: translate(-50%, -50%) scale(0.94); }
 .spotify-btn.saved { box-shadow: 0 0 0 2px #1DB954; }
