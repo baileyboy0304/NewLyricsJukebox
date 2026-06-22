@@ -869,6 +869,29 @@ class Controller:
     async def _fetch_lyrics_bg(self, runtime, lyrics_key, artist, title, album,
                                duration, spotify_id=None, search_artist=None,
                                search_title=None, force=False, isrc=None):
+        # Shazam doesn't report track duration, so recognition-driven tracks
+        # land here with duration=None — which forces LRCLIB onto the slower
+        # /api/search path ("No duration provided, trying search with specific
+        # fields"). Ask MA to enrich it before the providers fan out. The
+        # background task is exactly the right place: /current-track is
+        # already non-blocking, and the MA round-trip is cheap (single search).
+        if duration is None and self.ma and self.ma.connected:
+            try:
+                found = await self.ma.find_track_duration_seconds(
+                    artist, title, isrc=isrc, album=album)
+            except Exception:  # noqa: BLE001
+                logger.exception("MA duration enrichment failed for %s - %s",
+                                 artist, title)
+                found = None
+            if found:
+                duration = found
+                # Persist on the runtime track so the +/- on-demand path and
+                # the bad-match re-search both benefit without another lookup.
+                if runtime.lyrics_key == lyrics_key:
+                    runtime.track["duration_ms"] = found * 1000
+                logger.info("MA-enriched duration for %s - %s: %d s",
+                            artist, title, found)
+
         def on_update(data):
             if runtime.lyrics_key == lyrics_key:   # ignore if track changed
                 runtime.lyrics = data

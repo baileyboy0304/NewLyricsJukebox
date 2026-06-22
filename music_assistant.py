@@ -10,6 +10,7 @@ control (play/pause/next/previous/seek). Uses the official
 import asyncio
 import json
 import logging
+import re
 from typing import List, Optional
 
 from config import MUSIC_ASSISTANT, STATE_DIR
@@ -300,6 +301,85 @@ class MusicAssistant:
     async def play_pause(self, player_id): return await self._player_cmd("play_pause", player_id)
     async def next(self, player_id):     return await self._player_cmd("next", player_id)
     async def previous(self, player_id): return await self._player_cmd("previous", player_id)
+
+    # -- enrichment -------------------------------------------------------- #
+
+    async def find_track_duration_seconds(
+        self,
+        artist: Optional[str],
+        title: Optional[str],
+        isrc: Optional[str] = None,
+        album: Optional[str] = None,
+    ) -> Optional[int]:
+        """Look up a track duration (rounded seconds) by searching MA's
+        connected music providers. Used to enrich recognition results that
+        carry no duration so LRCLIB can hit /api/get exact-match instead of
+        falling back to the slower /api/search.
+
+        Conservative: a hit must match the artist (punctuation-insensitive)
+        and either share the ISRC OR match the normalised title. Returns
+        ``None`` rather than guessing if nothing matches — a wrong duration
+        would steer LRCLIB at the wrong recording."""
+        if not self._client or not (artist and title):
+            return None
+        try:
+            from music_assistant_models.enums import MediaType
+            media_types = [MediaType.TRACK]
+        except Exception:  # noqa: BLE001
+            media_types = None
+        kwargs = {"search_query": f"{artist} {title}", "limit": 10}
+        if media_types is not None:
+            kwargs["media_types"] = media_types
+        try:
+            results = await self._client.music.search(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("MA track-duration search failed: %s", exc)
+            return None
+        tracks = list(getattr(results, "tracks", None) or [])
+        if not tracks:
+            return None
+
+        # 1. ISRC match — the strongest signal (skip the conservative artist
+        #    check; ISRC equality already implies it's the same recording).
+        isrc_key = (isrc or "").strip().upper() or None
+        if isrc_key:
+            for t in tracks:
+                if not t.duration:
+                    continue
+                try:
+                    from music_assistant_models.enums import ExternalID
+                    isrc_val = t.get_external_id(ExternalID.ISRC)
+                except Exception:  # noqa: BLE001
+                    isrc_val = None
+                if isrc_val and isrc_val.upper() == isrc_key:
+                    return int(round(t.duration))
+
+        # 2. Title + artist match (normalised).
+        from text_clean import strip_version_noise
+        _NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+        def norm(s: Optional[str]) -> str:
+            return _NON_ALNUM.sub("", strip_version_noise((s or "").strip().lower()))
+
+        target_artist = norm(artist)
+        target_title = norm(title)
+        if not (target_artist and target_title):
+            return None
+        for t in tracks:
+            if not t.duration:
+                continue
+            artists = [norm(getattr(a, "name", "")) for a in (t.artists or [])]
+            artist_str_norm = norm(getattr(t, "artist_str", "") or "")
+            if target_artist not in artists and target_artist != artist_str_norm:
+                continue
+            title_norm = norm(getattr(t, "name", ""))
+            if not title_norm:
+                continue
+            if title_norm == target_title \
+                    or title_norm.startswith(target_title) \
+                    or target_title.startswith(title_norm):
+                return int(round(t.duration))
+        return None
 
     # -- playlists --------------------------------------------------------- #
 
