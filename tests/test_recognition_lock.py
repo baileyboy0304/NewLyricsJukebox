@@ -315,44 +315,78 @@ def test_same_recording_ignores_artist_punctuation():
     assert _same_recording(a, b) is True
 
 
-def test_artist_mismatch_with_continuous_position_is_same_song():
-    """The Michael Jackson case: Shazam drops a compilation tag
-    ('Lo Mejor Del Pop, Vol. 17') as the artist for one cycle mid-song. Same title
-    + an anchor right on the locked baseline -> same song, not a track change."""
+def test_artist_mismatch_holds_held_track_when_title_matches():
+    """The Michael Jackson / Haloca case: Shazam drops a garbage artist tag
+    ('Lo Mejor Del Pop, Vol. 17', or — observed in the wild — 'Haloca' for one
+    cycle of a Luther Vandross 'Dance With My Father' run) and the offset is
+    from THAT match's reference, which doesn't line up with our locked
+    baseline. Title alone is the strongest signal we have — once we hold a
+    titled track, any same-title recognition stays on that track regardless
+    of artist or anchor agreement. Artwork / metadata flap is unacceptable."""
     import asyncio
 
     async def scenario():
         rec = _acr_recognizer(priority=False)
-        # Establish baseline: capture at t=1000, song position 20s -> anchor -980.
         await rec._handle_success(
             make(20, 1000.0, title="Man In the Mirror (2003 Edit)",
                  artist="Michael Jackson"))
         held = rec._current
-        # Garbage artist, same title, capture 14s later, song advanced ~14s ->
-        # anchor still ~-980 (within tolerance).
+        # Garbage artist, same title, anchor wildly off (Shazam matched a
+        # different reference and reports its own offset).
         await rec._handle_success(
-            make(34, 1014.0, title="Man In The Mirror",
+            make(120, 1000.0, title="Man In The Mirror",
                  artist="Lo Mejor Del Pop, Vol. 17 & Vol. 17"))
-        # Held title/artist preserved, NOT treated as a song change.
         assert rec._current.title == held.title
         assert rec._current.artist == held.artist
 
     asyncio.run(scenario())
 
 
-def test_artist_mismatch_with_discontinuous_position_is_a_new_song():
-    """A real different song by a different artist (anchor far from baseline) is
-    still detected as a track change."""
+def test_real_song_change_to_different_title_is_detected():
+    """A real next-track by a different artist with a different title IS a
+    song change — the title-match fallback only fires when titles agree."""
     import asyncio
 
     async def scenario():
         rec = _acr_recognizer(priority=False)
         await rec._handle_success(
             make(20, 1000.0, title="Some Song", artist="Artist A"))
-        # New artist, same title coincidence, anchor jumps by ~100s.
         await rec._handle_success(
-            make(120, 1000.0, title="Some Song", artist="Artist B"))
-        assert rec._current.artist == "Artist B"   # treated as a real change
+            make(10, 1100.0, title="A Totally Different Song", artist="Artist B"))
+        assert rec._current.artist == "Artist B"
+        assert rec._current.title == "A Totally Different Song"
+
+    asyncio.run(scenario())
+
+
+def test_haloca_flap_holds_luther_held_track():
+    """End-to-end regression: a Luther Vandross 'Dance With My Father' run
+    is interrupted by a Shazam misidentification labelled 'Haloca - Dance
+    With My Father' for one cycle, then 'Luther - Dance With My Father
+    (5.1 Mix)' for another. Both must be merged into the held Luther track:
+    no metadata flap, no album-art reload, no lyric refetch."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        # Lock the Luther track.
+        await rec._handle_success(make(60, 1000.0,
+                                       title="Dance With My Father",
+                                       artist="Luther Vandross"))
+        held_title = rec._current.title
+        held_artist = rec._current.artist
+        # Shazam flap to a different artist with the same title — must hold.
+        await rec._handle_success(make(122, 1100.0,
+                                       title="Dance With My Father",
+                                       artist="Haloca"))
+        assert rec._current.title == held_title
+        assert rec._current.artist == held_artist
+        # Shazam flap to a version-noise variant ('5.1 Mix') — also holds.
+        await rec._handle_success(make(112, 1110.0,
+                                       title="Dance With My Father (5.1 Mix)",
+                                       artist="Luther Vandross"))
+        assert rec._current.title == held_title
+        assert rec._current.artist == held_artist
 
     asyncio.run(scenario())
 
