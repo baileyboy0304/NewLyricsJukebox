@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.83"
+version: "1.0.84"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"

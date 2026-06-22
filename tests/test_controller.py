@@ -11,7 +11,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("NLJ_DATA_DIR", tempfile.mkdtemp(prefix="nlj_ctl_"))
 os.environ.setdefault("NLJ_OPTIONS_FILE", "/tmp/nlj_no_options.json")
 
-from server import Controller, PlayerRuntime  # noqa: E402
+from server import Controller, PlayerRuntime, _track_duration_seconds  # noqa: E402
+
+
+def test_track_duration_seconds_rounds_not_floors():
+    # LRCLIB's /api/get exact match compares against rounded seconds; the
+    # old `// 1000` would give 237 for a 237.501s track and miss the match.
+    assert _track_duration_seconds({"duration_ms": 237501}) == 238
+    assert _track_duration_seconds({"duration_ms": 237499}) == 237
+    assert _track_duration_seconds({"duration_ms": 0}) is None
+    assert _track_duration_seconds({}) is None
+    assert _track_duration_seconds(None) is None
 
 
 class _Fast:
