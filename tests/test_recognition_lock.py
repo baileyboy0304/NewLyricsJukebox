@@ -276,6 +276,26 @@ def test_same_song_ignores_artist_punctuation():
     assert _same_song(b, a) is True
 
 
+def test_same_song_accepts_title_prefix_match():
+    """The Céline Dion case: same recording labelled "Because You Loved Me"
+    one cycle, "Because You Loved Me (Theme from "Up Close and Personal")"
+    the next. Different ISRCs are sometimes assigned to each label
+    (CAC222400016 vs CAC229600025), so the ISRC short-circuit can't merge
+    them — instead the normalised title-prefix check has to. A genuinely
+    different song by the same artist is still rejected."""
+    from recognition.engine import _same_song
+    short = make(10, 0, title="Because You Loved Me", artist="Céline Dion")
+    long = make(10, 0,
+                title='Because You Loved Me (Theme from "Up Close and Personal")',
+                artist="Céline Dion")
+    short.isrc = "CAC222400016"
+    long.isrc = "CAC229600025"
+    assert _same_song(short, long) is True
+    assert _same_song(long, short) is True
+    different = make(10, 0, title="My Heart Will Go On", artist="Céline Dion")
+    assert _same_song(short, different) is False
+
+
 def test_same_song_uses_isrc_when_present():
     """Matching ISRC is conclusive even if the artist/title strings drift."""
     from recognition.engine import _same_song

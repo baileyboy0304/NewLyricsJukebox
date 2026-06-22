@@ -70,16 +70,21 @@ def _same_recording(a: RecognitionResult, b: RecognitionResult) -> bool:
 
 
 def _same_song(a: RecognitionResult, b: Optional[RecognitionResult]) -> bool:
-    """Song-change detection that ignores version-suffix churn AND the punctuation
-    flips Shazam frequently introduces ("Rem" vs "R.E.M.", "Babylon" vs
-    "Babylon (UK Radio Mix)"). The strict title check treated each flip as a
-    brand-new song: it reset the position lock every few seconds (a visible
-    "shudder" as the lyrics jumped) AND spent an ACR credit each time (burning the
-    daily quota). A matching ISRC is conclusive; otherwise two reads are the same
-    song when the punctuation-insensitive artist matches and the cleaned titles
-    are equal. (The artist-mismatch case — e.g. a compilation tag like
-    "Lo Mejor Del Pop, Vol. 17" appearing for one cycle of Michael Jackson — is
-    handled in _handle_success via the lock's position-continuity guard.)"""
+    """Song-change detection that ignores Shazam's metadata churn for the same
+    audio. Three classes of flap merged here:
+      * Punctuation: "Rem" vs "R.E.M." (collapsed by _norm_artist).
+      * Strippable version suffix: "Babylon" vs "Babylon (UK Radio Mix)"
+        (handled by strip_version_noise inside _norm_title).
+      * Title-only expansion / subtitle that *isn't* in the version-noise list,
+        e.g. "Because You Loved Me" vs "Because You Loved Me (Theme from "Up
+        Close and Personal")" — both Shazam labels for the same recording.
+        A different ISRC is sometimes assigned to each label (CAC222400016 vs
+        CAC229600025), so the ISRC short-circuit doesn't save us; instead we
+        accept the case where one normalised title is a prefix of the other.
+
+    The artist-mismatch case — e.g. a compilation tag like "Lo Mejor Del Pop,
+    Vol. 17" appearing for one cycle of Michael Jackson — still needs the
+    position-continuity guard in _handle_success."""
     if b is None:
         return False
     if a.isrc and b.isrc and a.isrc == b.isrc:
@@ -87,7 +92,10 @@ def _same_song(a: RecognitionResult, b: Optional[RecognitionResult]) -> bool:
     na, nb = _norm_artist(a.artist), _norm_artist(b.artist)
     if not na or na != nb:
         return False
-    return _norm_title(a.title) == _norm_title(b.title)
+    ta, tb = _norm_title(a.title), _norm_title(b.title)
+    if not ta or not tb:
+        return False
+    return ta == tb or ta.startswith(tb) or tb.startswith(ta)
 
 
 class LockTracker:
