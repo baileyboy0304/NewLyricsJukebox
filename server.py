@@ -36,6 +36,17 @@ LEASE_TTL = 6.0
 LYRIC_SILENCE_THRESHOLD = 2
 
 
+def _track_duration_seconds(track) -> Optional[int]:
+    """Round a track's duration_ms to whole seconds for LRCLIB / other
+    providers that take seconds. Rounded (not floored) so 237501 -> 238,
+    matching what providers' exact-match endpoints actually compare
+    against. Returns None when the duration is unknown."""
+    ms = (track or {}).get("duration_ms")
+    if not ms:
+        return None
+    return int(round(int(ms) / 1000))
+
+
 def _track_anchor_ms(runtime) -> int:
     """Wall-clock epoch-ms at which the current track's playback position
     was 0. Used to compute absolute display_at times for each lyric line:
@@ -899,7 +910,7 @@ class Controller:
             await self.lyrics_service.fetch_provider(
                 artist, title, provider,
                 runtime.track.get("album"),
-                (runtime.track.get("duration_ms") or 0) // 1000 or None,
+                _track_duration_seconds(runtime.track),
                 on_update=on_update,
                 spotify_id=runtime.track.get("spotify_id"),
                 isrc=runtime.track.get("isrc"),
@@ -958,7 +969,7 @@ class Controller:
             runtime.lyrics_task = asyncio.create_task(self._fetch_lyrics_bg(
                 runtime, lyrics_key, artist, title,
                 runtime.track.get("album"),
-                (runtime.track.get("duration_ms") or 0) // 1000 or None,
+                _track_duration_seconds(runtime.track),
                 runtime.track.get("spotify_id"),
                 search_artist=sa, search_title=st,
                 isrc=runtime.track.get("isrc"),
