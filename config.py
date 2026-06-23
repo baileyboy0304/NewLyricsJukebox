@@ -157,15 +157,24 @@ AUDIO_RECOGNITION = {
     "blank_after_failures": _as_int(conf("blank_after_failures", 3), 3),
     "blank_after_failures_near_end": _as_int(conf("blank_after_failures_near_end", 1), 1),
     "song_end_window": _as_float(conf("song_end_window", 30.0), 30.0),
-    # --- TEST FEATURE: ACR priority (one ACRCloud refinement per track) ---
-    # When ON, each newly-detected track gets exactly ONE ACRCloud lookup to
-    # refine the Shazam position (ACR is assumed more accurate). If the ACR
-    # position agrees with Shazam within ``acr_priority_tolerance`` seconds it is
-    # adopted and FROZEN for the rest of the track — subsequent Shazam reads no
-    # longer move the clock. When OFF the app behaves exactly as before (ACRCloud
-    # is only the fallback when Shazam fails to match). Default OFF.
+    # ACR priority: one ACRCloud refinement per track. When ON, each newly-
+    # detected track gets exactly ONE ACRCloud lookup to refine the Shazam
+    # position (ACR is assumed more accurate). If the ACR position agrees
+    # with Shazam within ``acr_priority_tolerance`` seconds it is adopted
+    # and FROZEN for the rest of the track — subsequent Shazam reads no
+    # longer move the clock. When OFF the app behaves exactly as before
+    # (ACRCloud is only the fallback when Shazam fails to match).
     "acr_priority": _as_bool(conf("acr_priority", False), False),
     "acr_priority_tolerance": _as_float(conf("acr_priority_tolerance", 5.0), 5.0),
+    # Whether room-mic audio is allowed into the recognition pipeline. Off by
+    # default — recognition routes captured room audio through Shazam /
+    # ACRCloud (third-party cloud services), so it's privacy-sensitive. When
+    # off, the lyrics-mic-bridge keeps the ESP mics silent (no green dot,
+    # no UDP streamed) and NLJ skips recognition for any incoming mic UDP
+    # as defence in depth. Stream-recognition for audio routed THROUGH
+    # Music Assistant (ha-udp-lyrics-player) is independent of this and
+    # controlled by ``recognition_enabled`` above.
+    "mic_recognition_enabled": _as_bool(conf("mic_recognition_enabled", False), False),
 }
 
 ACRCLOUD = {
