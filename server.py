@@ -739,14 +739,16 @@ class Controller:
         runtime.mode = "stream"
         stream_key = self._resolve_stream_key(stream_key, ma_id)
         runtime.rec_stream = stream_key
-        # Defence in depth: when mic recognition is off AND this player is a
-        # bridge-tagged mic (source_players association), refuse to start a
-        # recogniser even if mic UDP somehow reaches us. The bridge SHOULD
-        # already be keeping the mic silent (no green dot, no UDP), but we
-        # don't trust the network — Shazam / ACRCloud are third-party cloud
-        # services, never send mic audio there without the user opting in.
-        if key in self.source_players \
-                and not AUDIO_RECOGNITION.get("mic_recognition_enabled", False):
+        # Privacy gate: when 'Enable microphone recognition' is off (the
+        # add-on default), refuse to start the Shazam/ACRCloud pipeline on
+        # ANY incoming UDP audio. We can't tell mic UDP from
+        # ha-udp-lyrics-player UDP at the wire level (same RTP format), so
+        # the safe semantic is "if mic recognition is disabled, no UDP
+        # audio is recognised, full stop". Users who want recognition for
+        # MA-routed audio (ha-udp-lyrics-player) must opt in by turning
+        # mic recognition on — that's the trade documented in the option's
+        # privacy note.
+        if not AUDIO_RECOGNITION.get("mic_recognition_enabled", False):
             runtime.rec_stream = None
             self._log_mode(runtime, name, "stream", None,
                            " (mic recognition disabled — no recognizer)")
