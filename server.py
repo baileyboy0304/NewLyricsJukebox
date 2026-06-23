@@ -14,7 +14,7 @@ from typing import Dict, Optional
 from quart import Quart, jsonify, render_template, request
 
 from classify import classify_source_mode
-from config import LYRICS, PLAYERS, RESOURCES_DIR, SERVER, VERSION
+from config import AUDIO_RECOGNITION, LYRICS, PLAYERS, RESOURCES_DIR, SERVER, VERSION
 from lyrics import LyricsData, LyricsService, visible_lines, alternate_queries
 from ma_models import PlayerState
 
@@ -739,6 +739,20 @@ class Controller:
         runtime.mode = "stream"
         stream_key = self._resolve_stream_key(stream_key, ma_id)
         runtime.rec_stream = stream_key
+        # Defence in depth: when mic recognition is off AND this player is a
+        # bridge-tagged mic (source_players association), refuse to start a
+        # recogniser even if mic UDP somehow reaches us. The bridge SHOULD
+        # already be keeping the mic silent (no green dot, no UDP), but we
+        # don't trust the network — Shazam / ACRCloud are third-party cloud
+        # services, never send mic audio there without the user opting in.
+        if key in self.source_players \
+                and not AUDIO_RECOGNITION.get("mic_recognition_enabled", False):
+            runtime.rec_stream = None
+            self._log_mode(runtime, name, "stream", None,
+                           " (mic recognition disabled — no recognizer)")
+            runtime.track = {"source": "stream", "player": name, "title": None,
+                             "artist": None, "is_playing": False, "seekable": False}
+            return runtime.track
         rec = await self._ensure_recognizer(stream_key)
         result = rec.current if rec else None
         if result is None:
@@ -1203,7 +1217,16 @@ def create_app(controller: Controller) -> Quart:
 
     @app.route("/health")
     async def health():
-        return jsonify({"status": "ok", "version": VERSION})
+        # mic_recognition_enabled is published here so the lyrics-mic-bridge
+        # can read it on connect and never bring the ESP mics up while the
+        # switch is off (no UDP, no green privacy dot).
+        return jsonify({
+            "status": "ok",
+            "version": VERSION,
+            "recognition_enabled": bool(AUDIO_RECOGNITION.get("enabled", True)),
+            "mic_recognition_enabled": bool(
+                AUDIO_RECOGNITION.get("mic_recognition_enabled", False)),
+        })
 
     @app.route("/time")
     async def server_time():

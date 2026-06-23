@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.88"
+version: "1.0.89"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -48,6 +48,7 @@ options:
   song_end_window: 30.0
   acr_priority: false
   acr_priority_tolerance: 5.0
+  mic_recognition_enabled: false
   # --- UDP audio ---
   udp_audio_sample_rate: 16000
   udp_jitter_buffer_ms: 60
@@ -86,6 +87,7 @@ schema:
   song_end_window: "float(0.0,300.0)"
   acr_priority: bool
   acr_priority_tolerance: "float(0.0,30.0)"
+  mic_recognition_enabled: bool
   udp_audio_sample_rate: "int(8000,48000)"
   udp_jitter_buffer_ms: "int(0,500)"
   acrcloud_host: str?
