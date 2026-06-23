@@ -84,16 +84,18 @@ configuration:
   mic_recognition_enabled:
     name: Recognition — Enable microphone recognition
     description: >-
-      Allow room audio captured by ESPHome mic devices to be sent to the
-      recognition engines (Shazam / ACRCloud). PRIVACY NOTE — when enabled,
-      everything the mic hears is uploaded to those third-party cloud services
-      for identification. Leave OFF unless you actively want mic-based
-      recognition. When OFF, the lyrics-mic-bridge keeps the ESP mics idle
-      (no green privacy dot, no UDP audio leaves the device) and NLJ drops
-      any mic audio that does arrive. Stream recognition for audio routed
-      through Music Assistant (ha-udp-lyrics-player) is independent of this
-      switch and stays controlled by "Enable stream recognition" above.
-      Default off.
+      Allow incoming UDP audio (from ESPHome mic devices, or any other RTP
+      source) to be sent to the recognition engines (Shazam / ACRCloud).
+      PRIVACY NOTE — when enabled, captured room audio is uploaded to those
+      third-party cloud services for identification. Leave OFF unless you
+      actively want mic-based recognition. When OFF, the lyrics-mic-bridge
+      keeps the ESP mics idle (no green privacy dot, no UDP audio leaves
+      the device) AND NLJ refuses to recognise any UDP audio that does
+      reach it. Note: NLJ cannot tell mic UDP from ha-udp-lyrics-player
+      UDP at the wire level, so this switch also gates stream-recognition
+      for audio routed through Music Assistant — turn it on if you want
+      either. Lyrics for MA-queue tracks (Spotify, Apple Music, local
+      files) work without recognition and aren't affected. Default off.
   # --- UDP audio ---
   udp_audio_sample_rate:
     name: UDP audio — Sample rate (Hz)
