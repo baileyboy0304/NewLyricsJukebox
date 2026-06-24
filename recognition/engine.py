@@ -46,6 +46,48 @@ def _norm_title(s: Optional[str]) -> str:
     return _NON_ALNUM_RE.sub("", strip_version_noise((s or "").strip().lower()))
 
 
+def _title_tokens(s: Optional[str]) -> set:
+    """Token set of a title, used for the held-track flap detector. Splits on
+    any non-alphanumeric (so parenthetical and bracketed decorations break
+    naturally into their own tokens — the test below treats them as
+    insignificant when there's enough non-paren overlap). version-noise
+    keywords are pre-stripped before tokenising so 'Hello (Remastered)' and
+    'Hello' come out with the same primary tokens."""
+    cleaned = strip_version_noise((s or "").strip().lower())
+    return {t for t in _NON_ALNUM_RE.split(cleaned) if t}
+
+
+def _titles_overlap(a: Optional[str], b: Optional[str]) -> bool:
+    """Same-title heuristic for the held-track fallback. Returns True when:
+      * one normalised title equals the other,
+      * one normalised title is a prefix of the other,
+      * one token set is a subset of the other (e.g. 'Hello (Acoustic)' vs
+        'Hello'), or
+      * at least 2 tokens overlap AND the higher coverage ratio is >= 0.7.
+
+    The last case catches the UB40 mess:
+      A = '(I Can't Help) Falling In Love With You [Remastered]'
+      B = 'Can't Help Falling in Love (Live)'
+    Both label the same UB40 audio, neither is a prefix of the other, and
+    they have different ISRCs/Spotify ids per label — so the only signal
+    available is that 6 of 7 of B's tokens appear in A. Same-artist gate
+    upstream guards against false-merging two genuinely-different songs by
+    the same artist with overlapping words."""
+    na, nb = _norm_title(a), _norm_title(b)
+    if na and nb and (na == nb or na.startswith(nb) or nb.startswith(na)):
+        return True
+    ta, tb = _title_tokens(a), _title_tokens(b)
+    if not ta or not tb:
+        return False
+    if ta <= tb or tb <= ta:
+        return True
+    inter = ta & tb
+    if len(inter) < 2:
+        return False
+    cov = max(len(inter) / len(ta), len(inter) / len(tb))
+    return cov >= 0.7
+
+
 def _same_recording(a: RecognitionResult, b: RecognitionResult) -> bool:
     """Looser track equality used only by the ACR refinement. Shazam and ACRCloud
     routinely label the same recording differently — e.g. "It Must Have Been Love"
@@ -341,22 +383,31 @@ class PlayerRecognizer:
         self._paused = False
         new_song = not _same_song(result, self._current)
         if new_song and self._current is not None:
-            # Title-only fallback. When the artist string flips between
-            # cycles (Shazam returning "Haloca" mid-Luther run, etc.) the
-            # offset/anchor reported by Shazam is from THAT match's
-            # reference recording — not Luther's — so the locked baseline
-            # comparison can't reconcile them. Title alone is the strongest
-            # signal we have: same normalised title -> same song, full
-            # stop. The cost of a false merge here (a real next-track that
-            # happens to share a name) is the lyric position briefly being
-            # wrong until the lock catches up; the cost of NOT merging is
-            # artwork + metadata flapping every few seconds, which the user
-            # sees as unacceptable churn.
-            if _norm_title(result.title) == _norm_title(self._current.title):
+            # Held-track flap detector. Shazam routinely labels the same audio
+            # different ways between cycles (artist string drifts, '(Theme
+            # from ...)' subtitle appears/disappears, a [Remastered] vs (Live)
+            # toggle on the same UB40 audio, etc.) and the offset reported is
+            # from THAT match's reference recording — not the held one — so
+            # the lock's baseline can't reconcile them. We can't trust the
+            # anchor; the only reliable signal is title similarity.
+            #
+            # Two cases merged here:
+            #   1. Same (or prefix-equivalent) normalised title with the
+            #      artist drifting (Luther <-> Haloca, Michael Jackson <->
+            #      'Lo Mejor Del Pop, Vol. 17', etc.). _titles_overlap on
+            #      exact / prefix wins.
+            #   2. SAME artist, DIFFERENT title strings that share most of
+            #      their significant words (the UB40 case). Same-artist gate
+            #      narrows the false-merge risk to genuinely-different songs
+            #      by the same artist that happen to share several tokens —
+            #      rare and worth the trade. _titles_overlap on token set
+            #      handles this case.
+            if _titles_overlap(result.title, self._current.title):
                 logger.info(
-                    "Treating %s - %s as same song (title match; "
-                    "artist '%s' differs from held '%s')",
-                    result.artist, result.title, result.artist, self._current.artist)
+                    "Treating %s - %s as same song (title overlap with "
+                    "held '%s - %s')",
+                    result.artist, result.title,
+                    self._current.artist, self._current.title)
                 new_song = False
         if new_song:
             self._lock.reset()

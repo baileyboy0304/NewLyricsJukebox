@@ -359,6 +359,59 @@ def test_real_song_change_to_different_title_is_detected():
     asyncio.run(scenario())
 
 
+def test_ub40_title_token_flap_holds_held_track():
+    """The UB40 case: Shazam labels the same audio TWO different ways within
+    the same play:
+      A = '(I Can't Help) Falling In Love With You [Remastered]'
+      B = 'Can't Help Falling in Love (Live)'
+    Same artist, neither title is a prefix of the other, and Shazam reports
+    different ISRCs and Spotify ids per label — so the only signal we have
+    is that the titles share most of their significant words. Must merge
+    so no artwork/metadata flap happens within the song."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        # Lock the [Remastered] label first.
+        await rec._handle_success(make(
+            10, 1000.0,
+            title="(I Can't Help) Falling In Love With You [Remastered]",
+            artist="UB40"))
+        held = rec._current
+        # Shazam flap to the (Live) reference for one cycle.
+        await rec._handle_success(make(
+            122, 1100.0,
+            title="Can't Help Falling in Love (Live)",
+            artist="UB40"))
+        assert rec._current.title == held.title
+        assert rec._current.artist == held.artist
+        # And back to the Remastered label — still no flap.
+        await rec._handle_success(make(
+            115, 1110.0,
+            title="(I Can't Help) Falling In Love With You [Remastered]",
+            artist="UB40"))
+        assert rec._current.title == held.title
+
+    asyncio.run(scenario())
+
+
+def test_genuinely_different_titles_same_artist_are_a_song_change():
+    """Two different songs by the same artist whose normalised titles
+    barely overlap (intersection < 2 or coverage < 0.7) must still be
+    detected as a song change. Bohemian Rhapsody -> Don't Stop Me Now."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        await rec._handle_success(make(
+            10, 1000.0, title="Bohemian Rhapsody", artist="Queen"))
+        await rec._handle_success(make(
+            10, 1100.0, title="Don't Stop Me Now", artist="Queen"))
+        assert rec._current.title == "Don't Stop Me Now"
+
+    asyncio.run(scenario())
+
+
 def test_haloca_flap_holds_luther_held_track():
     """End-to-end regression: a Luther Vandross 'Dance With My Father' run
     is interrupted by a Shazam misidentification labelled 'Haloca - Dance
