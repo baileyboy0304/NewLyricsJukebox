@@ -45,12 +45,30 @@ def _coalesce_media_type(*types) -> Optional[str]:
 
 
 class MusicAssistant:
+    # Hard ceiling on every MA call. The old code awaited MA without a timeout,
+    # so a websocket killed mid-flight by an HA restart would freeze the
+    # supervisor forever (a tick stuck inside get_player_state blocks every
+    # subsequent tick). Surfacing None/timeout here lets the recognition
+    # fallback take over instead.
+    CALL_TIMEOUT = 5.0
+    RECONNECT_INITIAL = 2.0
+    RECONNECT_MAX = 30.0
+
     def __init__(self):
         self._url = MUSIC_ASSISTANT["server_url"]
         self._token = MUSIC_ASSISTANT["token"]
         self.preferred_player_id = MUSIC_ASSISTANT["player_id"] or None
         self._client = None
         self._listen_task = None
+        # Background runner that owns the connection lifecycle: connect, watch
+        # the listen task, reconnect with backoff when it dies. Set on connect();
+        # cancelled on disconnect().
+        self._runner_task = None
+        self._stopped = False
+        # True only while the websocket is actually up — flipped off the moment
+        # start_listening() returns so a stale `connected` can't fool the
+        # supervisor into awaiting a dead MA forever.
+        self._connected_event = asyncio.Event()
         # "{provider}:{name_lower}" -> item_id. Persisted to disk so a restart
         # doesn't re-create the playlist, and trusted absolutely once set
         # (don't re-verify against MA — that's what was creating duplicates
@@ -73,9 +91,58 @@ class MusicAssistant:
 
     @property
     def connected(self) -> bool:
-        return self._client is not None
+        # Reflects the actual websocket: clears the instant start_listening()
+        # returns (HA restart, network blip, deliberate disconnect), so callers
+        # short-circuit instead of awaiting a doomed call.
+        return self._connected_event.is_set()
 
     async def connect(self) -> bool:
+        """Start the background connection runner. The runner keeps MA connected
+        for the lifetime of the process, reconnecting with backoff after any
+        drop. Returns once the first attempt has either succeeded or failed."""
+        if self._stopped:
+            return False
+        if self._runner_task is None or self._runner_task.done():
+            self._runner_task = asyncio.create_task(self._run())
+        # Wait briefly for the first attempt to settle so callers see the same
+        # "True on success, False on first failure" semantics as before.
+        try:
+            await asyncio.wait_for(
+                self._connected_event.wait(), timeout=self.CALL_TIMEOUT + 1.0)
+        except asyncio.TimeoutError:
+            pass
+        return self.connected
+
+    async def _run(self):
+        """Lifecycle loop: connect, await the listen task, reconnect on death."""
+        backoff = self.RECONNECT_INITIAL
+        while not self._stopped:
+            ok = await self._connect_once()
+            if not ok:
+                try:
+                    await asyncio.sleep(backoff)
+                except asyncio.CancelledError:
+                    raise
+                backoff = min(backoff * 2, self.RECONNECT_MAX)
+                continue
+            backoff = self.RECONNECT_INITIAL
+            self._connected_event.set()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Music Assistant listen task died: %s — reconnecting", exc)
+            else:
+                logger.warning(
+                    "Music Assistant listen task ended — reconnecting")
+            self._connected_event.clear()
+            await self._teardown_client()
+
+    async def _connect_once(self) -> bool:
+        """One connect attempt. Sets ``self._client`` and ``self._listen_task``
+        on success, leaves them None on failure."""
         if not self._url:
             logger.warning("Music Assistant server URL not configured")
             return False
@@ -85,30 +152,54 @@ class MusicAssistant:
             logger.error("music-assistant-client not installed")
             return False
         try:
-            self._client = MusicAssistantClient(
+            client = MusicAssistantClient(
                 server_url=self._url,
                 aiohttp_session=None,
                 token=self._token or None,
             )
-            await asyncio.wait_for(self._client.connect(), timeout=5.0)
-            self._listen_task = asyncio.create_task(self._client.start_listening())
+            await asyncio.wait_for(client.connect(), timeout=self.CALL_TIMEOUT)
+            self._listen_task = asyncio.create_task(client.start_listening())
+            self._client = client
             logger.info("Connected to Music Assistant at %s", self._url)
             return True
         except Exception as exc:  # noqa: BLE001
             logger.error("Music Assistant connection failed: %s", exc)
             self._client = None
+            self._listen_task = None
             return False
 
-    async def disconnect(self):
-        if self._listen_task:
-            self._listen_task.cancel()
-            self._listen_task = None
-        if self._client:
+    async def _teardown_client(self):
+        """Drop the current client+listen task. Safe to call after the listen
+        task has already died — we just want the references gone so the next
+        connect attempt is from a clean slate."""
+        listen = self._listen_task
+        self._listen_task = None
+        if listen is not None and not listen.done():
+            listen.cancel()
             try:
-                await self._client.disconnect()
+                await listen
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                await asyncio.wait_for(client.disconnect(), timeout=self.CALL_TIMEOUT)
             except Exception:  # noqa: BLE001
                 pass
-            self._client = None
+
+    async def disconnect(self):
+        self._stopped = True
+        self._connected_event.clear()
+        runner = self._runner_task
+        self._runner_task = None
+        if runner is not None and not runner.done():
+            runner.cancel()
+            try:
+                await runner
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        await self._teardown_client()
 
     # -- players ----------------------------------------------------------- #
 
@@ -187,7 +278,10 @@ class MusicAssistant:
         queue = None
         queue_id = player_id
         try:
-            active = await self._client.player_queues.get_active_queue(player_id)
+            active = await asyncio.wait_for(
+                self._client.player_queues.get_active_queue(player_id),
+                timeout=self.CALL_TIMEOUT,
+            )
         except Exception:  # noqa: BLE001
             active = None
         if active is not None:
@@ -290,7 +384,11 @@ class MusicAssistant:
         if not self._client:
             return False
         try:
-            await self._client.send_command(f"players/cmd/{command}", player_id=player_id)
+            await asyncio.wait_for(
+                self._client.send_command(
+                    f"players/cmd/{command}", player_id=player_id),
+                timeout=self.CALL_TIMEOUT,
+            )
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning("Transport command %s failed: %s", command, exc)
@@ -331,7 +429,10 @@ class MusicAssistant:
         if media_types is not None:
             kwargs["media_types"] = media_types
         try:
-            results = await self._client.music.search(**kwargs)
+            results = await asyncio.wait_for(
+                self._client.music.search(**kwargs),
+                timeout=self.CALL_TIMEOUT,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.debug("MA track-duration search failed: %s", exc)
             return None
@@ -383,8 +484,8 @@ class MusicAssistant:
 
     # -- playlists --------------------------------------------------------- #
 
-    @staticmethod
-    async def _list_library_playlists(music, name, provider):
+    @classmethod
+    async def _list_library_playlists(cls, music, name, provider):
         """Best-effort wrapper around get_library_playlists() that tolerates
         client version drift (the search/provider kwargs aren't always
         accepted)."""
@@ -392,7 +493,10 @@ class MusicAssistant:
                        {"search": name},
                        {}):
             try:
-                return await music.get_library_playlists(**kwargs)
+                return await asyncio.wait_for(
+                    music.get_library_playlists(**kwargs),
+                    timeout=cls.CALL_TIMEOUT,
+                )
             except TypeError:
                 continue
             except Exception as exc:  # noqa: BLE001
@@ -432,7 +536,8 @@ class MusicAssistant:
                 kwargs = {"search_query": query, "limit": 5}
                 if media_types is not None:
                     kwargs["media_types"] = media_types
-                results = await music.search(**kwargs)
+                results = await asyncio.wait_for(
+                    music.search(**kwargs), timeout=self.CALL_TIMEOUT)
                 tracks = list(getattr(results, "tracks", None) or [])
                 # Prefer a hit that's already on the target provider so we add
                 # the Spotify-native URI; otherwise fall back to the top hit
@@ -475,8 +580,11 @@ class MusicAssistant:
                     logger.info("Reusing existing playlist %r (item_id=%s)",
                                 playlist_name, playlist_id)
             if playlist_id is None:
-                playlist = await music.create_playlist(
-                    playlist_name, provider_instance_or_domain=provider)
+                playlist = await asyncio.wait_for(
+                    music.create_playlist(
+                        playlist_name, provider_instance_or_domain=provider),
+                    timeout=self.CALL_TIMEOUT,
+                )
                 if playlist is None:
                     return {"ok": False, "error": "could not create playlist"}
                 playlist_id = playlist.item_id
@@ -486,12 +594,18 @@ class MusicAssistant:
                 # Get the playlist into MA's library so a future lookup (after
                 # the cache file is wiped) finds it instead of creating again.
                 try:
-                    await music.add_item_to_library(playlist)
+                    await asyncio.wait_for(
+                        music.add_item_to_library(playlist),
+                        timeout=self.CALL_TIMEOUT,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("add_item_to_library failed: %s", exc)
                 logger.info("Created playlist %r (item_id=%s)", playlist_name, playlist_id)
             try:
-                await music.add_playlist_tracks(playlist_id, [uri])
+                await asyncio.wait_for(
+                    music.add_playlist_tracks(playlist_id, [uri]),
+                    timeout=self.CALL_TIMEOUT,
+                )
             except Exception as exc:  # noqa: BLE001
                 # Cached id is stale (playlist deleted on Spotify). Drop the
                 # cache and let the next press re-resolve / re-create.
@@ -513,9 +627,15 @@ class MusicAssistant:
         if not self._client:
             return False
         try:
-            active = await self._client.player_queues.get_active_queue(player_id)
+            active = await asyncio.wait_for(
+                self._client.player_queues.get_active_queue(player_id),
+                timeout=self.CALL_TIMEOUT,
+            )
             queue_id = active.queue_id if hasattr(active, "queue_id") else active
-            await self._client.player_queues.seek(queue_id, int(position_ms) // 1000)
+            await asyncio.wait_for(
+                self._client.player_queues.seek(queue_id, int(position_ms) // 1000),
+                timeout=self.CALL_TIMEOUT,
+            )
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning("Seek failed: %s", exc)
