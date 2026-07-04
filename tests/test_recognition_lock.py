@@ -344,17 +344,51 @@ def test_artist_mismatch_holds_held_track_when_title_matches():
 
 def test_real_song_change_to_different_title_is_detected():
     """A real next-track by a different artist with a different title IS a
-    song change — the title-match fallback only fires when titles agree."""
+    song change — the title-match fallback only fires when titles agree.
+    It takes two consecutive agreeing reads to commit (song-change debounce),
+    matching a real track change persisting across recognition cycles."""
     import asyncio
 
     async def scenario():
         rec = _acr_recognizer(priority=False)
         await rec._handle_success(
             make(20, 1000.0, title="Some Song", artist="Artist A"))
+        # First read of the new track: held as a candidate, old track kept.
         await rec._handle_success(
             make(10, 1100.0, title="A Totally Different Song", artist="Artist B"))
+        assert rec._current.artist == "Artist A"
+        # Second agreeing read confirms the change.
+        await rec._handle_success(
+            make(14, 1104.0, title="A Totally Different Song", artist="Artist B"))
         assert rec._current.artist == "Artist B"
         assert rec._current.title == "A Totally Different Song"
+
+    asyncio.run(scenario())
+
+
+def test_single_bad_match_does_not_replace_held_track():
+    """The Radio Ga Ga / 'Vj DjMarco' field case: a single Shazam fingerprint
+    collision naming a different track must NOT replace the currently held
+    (and correctly playing) track. Only a repeat of the SAME rogue candidate
+    should ever displace it."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        await rec._handle_success(
+            make(17, 1000.0, title="Radio Ga Ga", artist="Queen"))
+        held = rec._current
+        # One-off bad match (a remix/bootleg sampling the same recording).
+        await rec._handle_success(
+            make(194, 1004.0, title="Radio Ga Ga (feat. Freddie Mercury & Queen) [Special Long Remix]",
+                 artist="Vj DjMarco"))
+        assert rec._current is held
+        # The real track is recognized again — the rogue candidate is dropped,
+        # not confirmed by an unrelated later read.
+        await rec._handle_success(
+            make(120, 1004.0, title="Radio Ga Ga", artist="Queen"))
+        assert rec._current.artist == "Queen"
+        assert rec._pending_song is None
 
     asyncio.run(scenario())
 

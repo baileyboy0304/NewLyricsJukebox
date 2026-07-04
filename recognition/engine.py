@@ -234,6 +234,12 @@ class PlayerRecognizer:
         self._current: Optional[RecognitionResult] = None
         self._last_outcome = ""
         self._last_outcome_at = 0.0
+        # Song-change debounce: a single differing read must repeat before it
+        # can displace an already-established track (see _handle_success).
+        self._song_change_confirm_after = max(
+            1, AUDIO_RECOGNITION.get("song_change_confirm_after", 2))
+        self._pending_song: Optional[RecognitionResult] = None
+        self._pending_count = 0
 
     # -- lifecycle --------------------------------------------------------- #
 
@@ -358,6 +364,35 @@ class PlayerRecognizer:
                     "artist '%s' differs from held '%s')",
                     result.artist, result.title, result.artist, self._current.artist)
                 new_song = False
+
+        if new_song and self._current is not None:
+            # A single read naming a different track is often a fingerprint
+            # collision — a remix/mashup/bootleg that samples the audio
+            # currently playing — rather than a genuine track change. Require
+            # the SAME candidate to repeat before displacing an already-
+            # established track. (Mirrors LockTracker's outlier handling, but
+            # for song identity rather than position.) The first track after
+            # silence/blank has no held track to protect, so it's unaffected.
+            if self._pending_song is not None and _same_song(result, self._pending_song):
+                self._pending_count += 1
+            else:
+                self._pending_song = result
+                self._pending_count = 1
+            if self._pending_count < self._song_change_confirm_after:
+                logger.info(
+                    "Song-change candidate %s - %s (%d of %d) — holding current track %s - %s",
+                    result.artist, result.title, self._pending_count,
+                    self._song_change_confirm_after,
+                    self._current.artist, self._current.title)
+                return
+            self._pending_song = None
+            self._pending_count = 0
+        else:
+            # Not a song change, or nothing held to protect — any pending
+            # candidate from an earlier rogue read is now stale.
+            self._pending_song = None
+            self._pending_count = 0
+
         if new_song:
             self._lock.reset()
             self._acr_anchored = False
@@ -504,6 +539,8 @@ class PlayerRecognizer:
         if self._failures >= self._blank_threshold() and self._current is not None:
             self._current = None
             self._lock.reset()
+            self._pending_song = None
+            self._pending_count = 0
             self._paused = True
             logger.info("Player %s: %d no-match -> cleared track (fade out)",
                         self.key, self._failures)
