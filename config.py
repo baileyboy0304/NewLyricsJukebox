@@ -157,6 +157,14 @@ AUDIO_RECOGNITION = {
     "blank_after_failures": _as_int(conf("blank_after_failures", 3), 3),
     "blank_after_failures_near_end": _as_int(conf("blank_after_failures_near_end", 1), 1),
     "song_end_window": _as_float(conf("song_end_window", 30.0), 30.0),
+    # A single Shazam read naming a different track than the one already
+    # displayed is often a fingerprint collision (a remix/mashup/bootleg that
+    # samples the currently-playing recording) rather than a real track
+    # change — see the Radio Ga Ga / "Vj DjMarco" case in the field. Require
+    # this many CONSECUTIVE reads of the same new track before displacing an
+    # already-established one. Doesn't apply to the first track detected
+    # after silence/blank, which is always accepted immediately.
+    "song_change_confirm_after": _as_int(conf("song_change_confirm_after", 2), 2),
     # ACR priority: one ACRCloud refinement per track. When ON, each newly-
     # detected track gets exactly ONE ACRCloud lookup to refine the Shazam
     # position (ACR is assumed more accurate). If the ACR position agrees

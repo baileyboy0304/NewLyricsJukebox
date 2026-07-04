@@ -46,6 +46,7 @@ options:
   blank_after_failures: 3
   blank_after_failures_near_end: 1
   song_end_window: 30.0
+  song_change_confirm_after: 2
   acr_priority: false
   acr_priority_tolerance: 5.0
   mic_recognition_enabled: false
@@ -85,6 +86,7 @@ schema:
   blank_after_failures: "int(1,10)"
   blank_after_failures_near_end: "int(1,10)"
   song_end_window: "float(0.0,300.0)"
+  song_change_confirm_after: "int(1,5)"
   acr_priority: bool
   acr_priority_tolerance: "float(0.0,30.0)"
   mic_recognition_enabled: bool
