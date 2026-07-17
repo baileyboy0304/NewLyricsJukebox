@@ -277,18 +277,19 @@ def _provider_enabled(name: str) -> bool:
 
 # Default provider ranking (lower = tried first). Musixmatch leads, then
 # LRCLIB, NetEase, QQ. Exposed on the add-on config page as a per-provider
-# "off | 1 | 2 | 3 | 4" dropdown (see config.yaml).
+# 0-4 number (0 = off), see config.yaml.
 _PROVIDER_DEFAULT_PRIORITY = {"musixmatch": 1, "lrclib": 2, "netease": 3, "qq": 4}
 
 
 def _provider_setting(name: str, default_priority: int) -> tuple:
     """Resolve a provider's (enabled, priority) from the add-on options.
 
-    The flat option ``provider_<name>_priority`` is authoritative and takes the
-    form ``off`` | ``1``..``4`` (a dropdown on the add-on config page): ``off``
-    disables the provider, a number is its rank (lower = tried first). Falls
-    back to the older split form — ``provider_<name>`` (bool) plus the dotted
-    ``providers.<name>.priority`` — for configs written before this existed.
+    The flat option ``provider_<name>_priority`` is authoritative: an int
+    ``0``..``4`` on the add-on config page — ``0`` disables the provider, a
+    number is its rank (lower = tried first). A ``"off"`` string is also
+    accepted for hand-edited configs. Falls back to the older split form —
+    ``provider_<name>`` (bool) plus the dotted ``providers.<name>.priority`` —
+    for configs written before this existed.
     """
     raw = conf(f"provider_{name}_priority", None)
     if raw is not None:
