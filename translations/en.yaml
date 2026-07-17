@@ -126,20 +126,28 @@ configuration:
       Maximum ACRCloud lookups per day. The counter persists across restarts.
       Default 100.
   # --- Lyrics providers ---
-  provider_lrclib:
-    name: Lyrics provider — LRCLIB
-    description: Fetch synced lyrics from the free, open LRCLIB database.
-  provider_musixmatch:
-    name: Lyrics provider — Musixmatch
-    description: Fetch synced lyrics from Musixmatch.
-  provider_netease:
-    name: Lyrics provider — NetEase
+  # Priority order: providers are tried lowest-number first and the first with
+  # usable line-synced lyrics wins. Set a provider to "off" to disable it.
+  provider_musixmatch_priority:
+    name: Lyrics provider priority — Musixmatch
     description: >-
-      Fetch synced lyrics from NetEase Cloud Music (useful for some non-Western
-      tracks).
-  provider_qq:
-    name: Lyrics provider — QQ Music
-    description: Fetch synced lyrics from QQ Music. Off by default — can be slow.
+      Where Musixmatch sits in the lookup order (1 = tried first), or "off" to
+      disable it. Default 1.
+  provider_lrclib_priority:
+    name: Lyrics provider priority — LRCLIB
+    description: >-
+      Where the free, open LRCLIB database sits in the lookup order, or "off"
+      to disable it. Default 2.
+  provider_netease_priority:
+    name: Lyrics provider priority — NetEase
+    description: >-
+      Where NetEase Cloud Music (useful for some non-Western tracks) sits in
+      the lookup order, or "off" to disable it. Default 3.
+  provider_qq_priority:
+    name: Lyrics provider priority — QQ Music
+    description: >-
+      Where QQ Music sits in the lookup order, or "off" to disable it. Can be
+      slow. Default 4.
   # --- General ---
   log_level:
     name: General — Log level

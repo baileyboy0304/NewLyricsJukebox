@@ -25,9 +25,9 @@ def service():
 def test_providers_loaded_and_ordered():
     svc = service()
     names = [p.name for p in svc.providers]
-    # lrclib(2) is now highest priority (Spotify removed); qq is last.
-    assert names[0] == "lrclib"
-    assert names.index("lrclib") < names.index("qq")
+    # Default order: musixmatch(1) leads, then lrclib(2), netease(3), qq(4).
+    assert names[0] == "musixmatch"
+    assert names.index("musixmatch") < names.index("qq")
     assert set(names) == {"lrclib", "musixmatch", "netease", "qq"}
 
 
@@ -337,8 +337,8 @@ def test_provider_names_in_ordered_by_priority():
     svc = service()
     db = {"saved_lyrics": {"qq": [[0.0, "q"]], "lrclib": [[0.0, "l"]],
                            "musixmatch": [[0.0, "m"]]}}
-    # lrclib(2) < musixmatch(3) < qq(5)
-    assert svc.provider_names_in(db) == ["lrclib", "musixmatch", "qq"]
+    # musixmatch(1) < lrclib(2) < qq(4)
+    assert svc.provider_names_in(db) == ["musixmatch", "lrclib", "qq"]
     assert svc.provider_names_in({}) == []
 
 
@@ -361,8 +361,8 @@ def test_enabled_provider_names_is_full_cycle_list():
     """The +/- cycle lists ALL enabled providers, not only those with lyrics."""
     svc = service()
     names = svc.enabled_provider_names()
-    assert names[0] == "lrclib"             # priority order (Spotify removed)
-    assert "musixmatch" in names and "netease" in names
+    assert names[0] == "musixmatch"         # default priority order
+    assert "lrclib" in names and "netease" in names
 
 
 def test_set_preferred_is_used_on_recall():
