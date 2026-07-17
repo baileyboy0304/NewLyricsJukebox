@@ -483,6 +483,68 @@ def test_variant_flip_keeps_first_title_but_refines_position():
     asyncio.run(scenario())
 
 
+def test_retime_resets_lock_and_reacquires_position():
+    """Long-press-the-dot retime: dropping the lock must make the very next
+    recognition re-baseline the served position (status 'initial' again) while
+    keeping the held track, so drifted lyrics can be rescued mid-song."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)   # ACR off -> pure lock behaviour
+        # Lock a track on timeline anchor 10.
+        for off, cs in [(10, 0), (15, 5), (20, 10), (25, 15)]:
+            await rec._handle_success(make(off, cs, title="Drifting",
+                                           artist="A"))
+        assert rec._lock.locked is True
+        assert rec.retiming is False
+        held = rec._current
+
+        rec.retime()
+        assert rec.retiming is True
+        assert rec._lock.locked is False        # lock dropped
+        assert rec._acr_anchored is False
+
+        # A fresh read on a NEW timeline (anchor 90) is now accepted immediately
+        # instead of being ignored as an outlier — the position re-anchors.
+        await rec._handle_success(make(120, 30, title="Drifting", artist="A"))
+        assert rec.retiming is False            # retime complete
+        assert rec._current.title == held.title  # same track kept
+        assert rec._current.offset == 120        # position re-acquired
+
+    asyncio.run(scenario())
+
+
+def test_retiming_flag_self_heals_after_timeout():
+    """If the stream goes silent right after a retime (no match to re-anchor
+    on), the flag must clear itself so a polling display isn't stuck blue."""
+    import recognition.engine as eng
+    from recognition.engine import PlayerRecognizer
+
+    rec = PlayerRecognizer("z", capture=None)
+    rec.retime()
+    assert rec.retiming is True
+    rec._retime_at -= (eng.RETIME_TIMEOUT + 1.0)   # pretend the cap has elapsed
+    assert rec.retiming is False
+
+
+def test_retiming_flag_cleared_when_track_blanks():
+    """Enough consecutive no-matches to blank the held track must also end any
+    in-progress retime — there's nothing left to re-time."""
+    import asyncio
+
+    async def scenario():
+        rec = _acr_recognizer(priority=False)
+        rec._blank_after = 1
+        await rec._handle_success(make(10, 0, title="T", artist="A"))
+        rec.retime()
+        assert rec.retiming is True
+        await rec._handle_failure()   # one no-match -> blanks (blank_after=1)
+        assert rec._current is None
+        assert rec.retiming is False
+
+    asyncio.run(scenario())
+
+
 def test_acrcloud_quota_resets_on_utc_day():
     """The daily counter must roll over on the UTC calendar day (ACRCloud's
     reset), not the server's local day."""
