@@ -430,7 +430,8 @@ class Controller:
         if rt is None or not rt.track:
             return {"source": rt.mode if rt else "stream", "player": name,
                     "title": None, "artist": None, "is_playing": False,
-                    "seekable": False, "server_time_ms": now_ms}
+                    "seekable": False, "server_time_ms": now_ms,
+                    "retiming": self._is_retiming(rt)}
         track = rt.track
         # The supervisor only recomputes the position ~once/second, but the browser
         # polls ~10x/s and re-anchors its flywheel each time — anchoring on a frozen
@@ -446,8 +447,38 @@ class Controller:
             "server_time_ms": now_ms,
             "track_anchor_ms": _track_anchor_ms(rt),
             "preload_time": LYRICS["preload_time"],
+            "retiming": self._is_retiming(rt),
         }
         return track
+
+    def _is_retiming(self, rt) -> bool:
+        """Is a forced position re-acquisition in progress for this player? Only
+        recognition-driven players have a recognizer to re-time; metadata-driven
+        players always report False."""
+        if rt is None or not rt.rec_stream:
+            return False
+        rec = self.recognizers.get(rt.rec_stream)
+        return bool(rec is not None and rec.retiming)
+
+    def retime(self, param: Optional[str]) -> dict:
+        """Force a fresh recognition-position re-acquisition for a player — the
+        display's 'long-press the privacy dot' retime action, used to rescue
+        lyrics that have drifted badly out of sync. Only meaningful for a
+        recognition-driven (radio / no-MA-metadata) track; a metadata-driven
+        player takes its position from Music Assistant, so there's nothing to
+        re-time and we report retiming=False."""
+        key, _ma_id, _stream_key, name = self._resolve(param)
+        name = self._friendly_name(key, name)
+        rt = self.runtimes.get(key)
+        rec = self.recognizers.get(rt.rec_stream) if (rt and rt.rec_stream) else None
+        if rec is not None:
+            rec.retime()
+            return {"ok": True, "retiming": True, "mode": "stream", "player": name}
+        logger.info("retime player=%s — no active recognizer "
+                    "(metadata-driven or idle)", name)
+        return {"ok": True, "retiming": False,
+                "mode": (rt.mode if rt else "stream"), "player": name,
+                "note": "metadata-driven or idle; sync comes from the source"}
 
     def _player_active(self, key: str) -> bool:
         """Worth running the pipeline for? An RTP stream player must have a live
@@ -1301,6 +1332,12 @@ def create_app(controller: Controller) -> Quart:
         )
         return jsonify(result)
 
+    @app.route("/retime", methods=["POST"])
+    async def retime():
+        body = await request.get_json(silent=True) or {}
+        return jsonify(controller.retime(
+            request.args.get("player") or body.get("player")))
+
     @app.route("/transport", methods=["POST"])
     async def transport():
         body = await request.get_json(silent=True) or {}
@@ -1323,7 +1360,7 @@ def create_app(controller: Controller) -> Quart:
     async def cache_headers(response):
         if request.path in ("/", "/current-track", "/lyrics", "/players",
                             "/bad-match", "/lyric-offset", "/suppress-lyrics",
-                            "/add-to-playlist"):
+                            "/add-to-playlist", "/retime"):
             response.headers["Cache-Control"] = "no-store"
         elif request.path.startswith("/static/"):
             # Revalidate static assets so a rebuilt add-on always serves fresh

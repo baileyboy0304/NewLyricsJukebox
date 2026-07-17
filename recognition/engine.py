@@ -32,6 +32,13 @@ _PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 # cycle. Shazam is normally <3s and the whole chain well under this.
 RECOGNIZE_TIMEOUT = 10.0
 
+# A retime (forced position re-acquisition, e.g. from the display long-pressing
+# the privacy dot) is finished once the next recognition re-baselines the
+# position. This is the safety cap after which the "retiming" flag clears itself
+# even if no fresh match ever lands (silence / dead air), so a polling display
+# can't get stuck showing "retiming" forever.
+RETIME_TIMEOUT = 20.0
+
 _NON_ALNUM_RE = re.compile(r"[^\w]+", re.UNICODE)
 
 
@@ -240,6 +247,13 @@ class PlayerRecognizer:
             1, AUDIO_RECOGNITION.get("song_change_confirm_after", 2))
         self._pending_song: Optional[RecognitionResult] = None
         self._pending_count = 0
+        # Retiming: a display can force a fresh position re-acquisition by
+        # long-pressing the on-device privacy dot (see Controller.retime).
+        # retime() drops the lock/ACR freeze; the flag stays true until the
+        # next recognition re-baselines the position (or RETIME_TIMEOUT) so a
+        # polling display can show the retime in progress.
+        self._retiming = False
+        self._retime_at = 0.0
 
     # -- lifecycle --------------------------------------------------------- #
 
@@ -280,6 +294,30 @@ class PlayerRecognizer:
         if self._current is None:
             return None
         return self._current.get_current_position() + self._latency_offset
+
+    # -- retiming ---------------------------------------------------------- #
+
+    def retime(self) -> None:
+        """Force a fresh position re-acquisition from live audio — the fix for
+        lyrics that have drifted badly out of sync. Drops the position lock and
+        any ACR freeze so the next recognition re-baselines the served position
+        (status ``initial``). The current track/lyrics are kept so the display
+        doesn't blank while it re-times."""
+        self._lock.reset()
+        self._acr_anchored = False
+        self._retiming = True
+        self._retime_at = time.time()
+        logger.info("Retime requested for %s — lock reset, re-acquiring position",
+                    self.key)
+
+    @property
+    def retiming(self) -> bool:
+        """True from a retime() request until a fresh anchor is re-acquired.
+        Self-heals after RETIME_TIMEOUT so a stalled/silent stream can't leave a
+        polling display stuck showing 'retiming' forever."""
+        if self._retiming and (time.time() - self._retime_at) > RETIME_TIMEOUT:
+            self._retiming = False
+        return self._retiming
 
     # -- recognition chain ------------------------------------------------- #
 
@@ -426,6 +464,13 @@ class PlayerRecognizer:
                     isrc=self._current.isrc or result.isrc,
                     duration=self._current.duration or result.duration,
                 )
+        # A retime is complete once a recognition actually re-baselines the
+        # position (any status other than a held rogue read). Clear the flag so
+        # a polling display can restore the dot from blue to green.
+        if self._retiming and status not in ("ignored", "outlier"):
+            self._retiming = False
+            logger.info("Retime complete for %s — position re-acquired (%.1fs)",
+                        self.key, result.get_current_position())
         self._log_recognition(result, status)
         if self._on_update:
             self._on_update(self)
@@ -541,6 +586,7 @@ class PlayerRecognizer:
             self._lock.reset()
             self._pending_song = None
             self._pending_count = 0
+            self._retiming = False   # track blanked — nothing left to re-time
             self._paused = True
             logger.info("Player %s: %d no-match -> cleared track (fade out)",
                         self.key, self._failures)

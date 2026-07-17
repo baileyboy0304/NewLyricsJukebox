@@ -641,6 +641,49 @@ def test_set_lyric_offset_propagates_to_other_runtimes_on_same_song():
     assert c.runtimes["other"].timing_offset == 0.0     # untouched
 
 
+def test_retime_forwards_to_recognizer_and_reflects_in_snapshot():
+    """The display's long-press-the-dot retime hits the player's recognizer and
+    the resulting 'retiming' state surfaces in /current-track so a polling
+    display knows when to turn the dot back from blue to green."""
+    class _FakeRec:
+        def __init__(self):
+            self.retimed = 0
+            self.retiming = False
+
+        def retime(self):
+            self.retimed += 1
+            self.retiming = True
+
+    c = Controller(ma=None, capture=None)
+    rec = _FakeRec()
+    c.recognizers["s1"] = rec
+    c.runtimes["p1"] = PlayerRuntime(
+        key="p1", mode="stream", rec_stream="s1",
+        track={"title": "Radio Song", "artist": "A", "is_playing": True})
+
+    r = c.retime("p1")
+    assert r == {"ok": True, "retiming": True, "mode": "stream", "player": "p1"}
+    assert rec.retimed == 1
+    # The in-progress retime is visible in the track snapshot.
+    assert c.track_snapshot("p1")["retiming"] is True
+    rec.retiming = False
+    assert c.track_snapshot("p1")["retiming"] is False
+
+
+def test_retime_noop_for_metadata_driven_player():
+    """A metadata-driven player (no recognizer) has nothing to re-time — position
+    comes from Music Assistant — so retime reports retiming=False and never
+    fabricates a recognizer."""
+    c = Controller(ma=None, capture=None)
+    c.runtimes["p1"] = PlayerRuntime(
+        key="p1", mode="queue", rec_stream=None,
+        track={"title": "Queue Song", "artist": "A", "is_playing": True})
+
+    r = c.retime("p1")
+    assert r["ok"] is True and r["retiming"] is False and r["mode"] == "queue"
+    assert c.track_snapshot("p1")["retiming"] is False
+
+
 def test_set_suppress_lyrics_toggles_and_persists():
     """Thumbs-down sets the runtime flag and persists it; toggling off clears it."""
     c = Controller(ma=None, capture=None)
