@@ -1,5 +1,5 @@
 name: "NewLyricsJukebox"
-version: "1.0.93"
+version: "1.0.94"
 slug: newlyricsjukebox
 description: "Time-synced lyrics for audio playing through Music Assistant (queue + stream recognition)."
 url: "https://github.com/baileyboy0304/newlyricsjukebox"
@@ -60,12 +60,12 @@ options:
   acrcloud_daily_limit: 100
   # --- Lyrics providers ---
   # Priority order for the four lyric providers: tried lowest-number first,
-  # and the first with usable line-synced lyrics wins. "off" disables a
-  # provider entirely. Defaults: Musixmatch, then LRCLIB, NetEase, QQ.
-  provider_musixmatch_priority: "1"
-  provider_lrclib_priority: "2"
-  provider_netease_priority: "3"
-  provider_qq_priority: "4"
+  # and the first with usable line-synced lyrics wins. 0 disables a provider
+  # entirely. Defaults: Musixmatch 1, LRCLIB 2, NetEase 3, QQ 4.
+  provider_musixmatch_priority: 1
+  provider_lrclib_priority: 2
+  provider_netease_priority: 3
+  provider_qq_priority: 4
   # --- Lyrics scheduling ---
   # Seconds NLJ delivers each lyric AHEAD of its display time. Devices
   # receive a display_at_epoch_ms anchored to NTP and render the line at
@@ -99,10 +99,10 @@ schema:
   acrcloud_access_key: str?
   acrcloud_access_secret: str?
   acrcloud_daily_limit: "int(0,10000)"
-  provider_musixmatch_priority: "list(off|1|2|3|4)"
-  provider_lrclib_priority: "list(off|1|2|3|4)"
-  provider_netease_priority: "list(off|1|2|3|4)"
-  provider_qq_priority: "list(off|1|2|3|4)"
+  provider_musixmatch_priority: "int(0,4)"
+  provider_lrclib_priority: "int(0,4)"
+  provider_netease_priority: "int(0,4)"
+  provider_qq_priority: "int(0,4)"
   preload_time: "float(0.0,5.0)"
   log_level: "list(DEBUG|INFO|WARNING|ERROR)"
   players_auto_discover: bool
