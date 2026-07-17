@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.95
+
+- **Forced lyric re-sync (`POST /retime`).** A display can now ask NLJ to
+  re-acquire the recognition sync position for lyrics that have drifted
+  badly out of sync (the physical devices trigger this by long-pressing the
+  green privacy dot). `PlayerRecognizer.retime()` drops the position lock and
+  any ACR freeze so the next recognition re-baselines the served position,
+  while keeping the held track so the display doesn't blank. A `retiming`
+  flag is surfaced on `/current-track` so a polling display knows when the
+  re-sync has finished; it self-heals after a 20 s cap (or when the track
+  blanks) so a silent stream can't leave it stuck. No-op for metadata-driven
+  players — their position comes from Music Assistant, so there's nothing to
+  re-time.
+
 ## 1.0.71
 
 - **Single-entry source_meta fallback.** Browser tabs that hold a SSRC
