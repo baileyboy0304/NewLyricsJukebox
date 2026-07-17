@@ -275,32 +275,64 @@ def _provider_enabled(name: str) -> bool:
     return _as_bool(val, True)
 
 
+# Default provider ranking (lower = tried first). Musixmatch leads, then
+# LRCLIB, NetEase, QQ. Exposed on the add-on config page as a per-provider
+# "off | 1 | 2 | 3 | 4" dropdown (see config.yaml).
+_PROVIDER_DEFAULT_PRIORITY = {"musixmatch": 1, "lrclib": 2, "netease": 3, "qq": 4}
+
+
+def _provider_setting(name: str, default_priority: int) -> tuple:
+    """Resolve a provider's (enabled, priority) from the add-on options.
+
+    The flat option ``provider_<name>_priority`` is authoritative and takes the
+    form ``off`` | ``1``..``4`` (a dropdown on the add-on config page): ``off``
+    disables the provider, a number is its rank (lower = tried first). Falls
+    back to the older split form — ``provider_<name>`` (bool) plus the dotted
+    ``providers.<name>.priority`` — for configs written before this existed.
+    """
+    raw = conf(f"provider_{name}_priority", None)
+    if raw is not None:
+        s = str(raw).strip().lower()
+        if s in ("off", "", "0", "none", "false", "disabled"):
+            return (False, default_priority)
+        return (True, _as_int(s, default_priority))
+    return (
+        _provider_enabled(name),
+        _as_int(conf(f"providers.{name}.priority", default_priority), default_priority),
+    )
+
+
+_lrclib_set = _provider_setting("lrclib", _PROVIDER_DEFAULT_PRIORITY["lrclib"])
+_musixmatch_set = _provider_setting("musixmatch", _PROVIDER_DEFAULT_PRIORITY["musixmatch"])
+_netease_set = _provider_setting("netease", _PROVIDER_DEFAULT_PRIORITY["netease"])
+_qq_set = _provider_setting("qq", _PROVIDER_DEFAULT_PRIORITY["qq"])
+
 PROVIDERS = {
     "lrclib": {
-        "enabled": _provider_enabled("lrclib"),
-        "priority": _as_int(conf("providers.lrclib.priority", 2), 2),
+        "enabled": _lrclib_set[0],
+        "priority": _lrclib_set[1],
         "base_url": "https://lrclib.net/api",
         "timeout": _as_int(conf("providers.lrclib.timeout", 10), 10),
         "retries": _as_int(conf("providers.lrclib.retries", 3), 3),
         "cache_duration": _as_int(conf("providers.lrclib.cache_duration", 86400), 86400),
     },
     "musixmatch": {
-        "enabled": _provider_enabled("musixmatch"),
-        "priority": _as_int(conf("providers.musixmatch.priority", 3), 3),
+        "enabled": _musixmatch_set[0],
+        "priority": _musixmatch_set[1],
         "timeout": _as_int(conf("providers.musixmatch.timeout", 15), 15),
         "retries": _as_int(conf("providers.musixmatch.retries", 3), 3),
         "cache_duration": _as_int(conf("providers.musixmatch.cache_duration", 86400), 86400),
     },
     "netease": {
-        "enabled": _provider_enabled("netease"),
-        "priority": _as_int(conf("providers.netease.priority", 4), 4),
+        "enabled": _netease_set[0],
+        "priority": _netease_set[1],
         "timeout": _as_int(conf("providers.netease.timeout", 10), 10),
         "retries": _as_int(conf("providers.netease.retries", 3), 3),
         "cache_duration": _as_int(conf("providers.netease.cache_duration", 86400), 86400),
     },
     "qq": {
-        "enabled": _provider_enabled("qq"),
-        "priority": _as_int(conf("providers.qq.priority", 5), 5),
+        "enabled": _qq_set[0],
+        "priority": _qq_set[1],
         "timeout": _as_int(conf("providers.qq.timeout", 10), 10),
         "retries": _as_int(conf("providers.qq.retries", 3), 3),
         "cache_duration": _as_int(conf("providers.qq.cache_duration", 86400), 86400),
