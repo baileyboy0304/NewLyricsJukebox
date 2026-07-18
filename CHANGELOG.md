@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.96
+
+- **Retime now waits for a real re-lock.** The forced re-sync (`/retime`,
+  long-press the privacy dot) was finishing on the *first* recognition after
+  the lock reset — often within a second, and on a single unconfirmed read.
+  On songs with repeated sections that first read can be an outlier, so retime
+  could jump the lyrics to the *wrong* place (observed: an ~8 s forward jump
+  that then clawed back). It now stays "in progress" until the position
+  RE-LOCKS on a fresh consensus (the same "3 consistent reads" rule normal
+  recognition uses), so the dot stays blue through the actual re-sync and the
+  final position is confirmed, not a one-off sample. Safety cap raised 20→30 s.
+
 ## 1.0.95
 
 - **Forced lyric re-sync (`POST /retime`).** A display can now ask NLJ to

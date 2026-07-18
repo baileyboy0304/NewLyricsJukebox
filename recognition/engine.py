@@ -33,11 +33,12 @@ _PROVIDER_LABELS = {"shazam": "Shazam", "acrcloud": "ACRCloud"}
 RECOGNIZE_TIMEOUT = 10.0
 
 # A retime (forced position re-acquisition, e.g. from the display long-pressing
-# the privacy dot) is finished once the next recognition re-baselines the
-# position. This is the safety cap after which the "retiming" flag clears itself
-# even if no fresh match ever lands (silence / dead air), so a polling display
-# can't get stuck showing "retiming" forever.
-RETIME_TIMEOUT = 20.0
+# the privacy dot) is finished once the position has RE-LOCKED on a fresh
+# consensus, which takes a few recognition cycles. This is the safety cap after
+# which the "retiming" flag clears itself even if the lock never re-confirms
+# (silence / dead air / a song with ambiguous repeated sections), so a polling
+# display can't get stuck showing "retiming" forever.
+RETIME_TIMEOUT = 30.0
 
 _NON_ALNUM_RE = re.compile(r"[^\w]+", re.UNICODE)
 
@@ -464,12 +465,19 @@ class PlayerRecognizer:
                     isrc=self._current.isrc or result.isrc,
                     duration=self._current.duration or result.duration,
                 )
-        # A retime is complete once a recognition actually re-baselines the
-        # position (any status other than a held rogue read). Clear the flag so
-        # a polling display can restore the dot from blue to green.
-        if self._retiming and status not in ("ignored", "outlier"):
+        # A retime is complete only once the position has RE-LOCKED on a fresh
+        # consensus — NOT on the first read after the reset. The first read is a
+        # single unconfirmed sample: on songs with repeated sections (chorus
+        # mismatch) it can be an outlier that would jump the lyrics to the wrong
+        # place, which is exactly what the lock's "3 consistent reads" rule
+        # exists to reject. So keep the flag (dot stays blue) through the
+        # initial + locking reads and clear it only when the lock re-confirms.
+        # 'reacquire' also lands locked, so lock.locked covers it; when locking
+        # is disabled there's no consensus to wait for, so the first 'tracking'
+        # read is the best signal we have.
+        if self._retiming and (self._lock.locked or status == "tracking"):
             self._retiming = False
-            logger.info("Retime complete for %s — position re-acquired (%.1fs)",
+            logger.info("Retime complete for %s — position re-locked (%.1fs)",
                         self.key, result.get_current_position())
         self._log_recognition(result, status)
         if self._on_update:
