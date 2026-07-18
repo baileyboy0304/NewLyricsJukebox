@@ -484,9 +484,10 @@ def test_variant_flip_keeps_first_title_but_refines_position():
 
 
 def test_retime_resets_lock_and_reacquires_position():
-    """Long-press-the-dot retime: dropping the lock must make the very next
-    recognition re-baseline the served position (status 'initial' again) while
-    keeping the held track, so drifted lyrics can be rescued mid-song."""
+    """Long-press-the-dot retime: dropping the lock lets a fresh recognition
+    re-baseline the served position, but the retime is only declared COMPLETE
+    once the position RE-LOCKS on a consensus — never on a single first read,
+    which could be an outlier that jumps the lyrics to the wrong place."""
     import asyncio
 
     async def scenario():
@@ -504,12 +505,19 @@ def test_retime_resets_lock_and_reacquires_position():
         assert rec._lock.locked is False        # lock dropped
         assert rec._acr_anchored is False
 
-        # A fresh read on a NEW timeline (anchor 90) is now accepted immediately
-        # instead of being ignored as an outlier — the position re-anchors.
+        # First read after the reset re-baselines the position immediately (new
+        # timeline anchor 90) BUT does not finish the retime — a single read is
+        # not yet a consensus.
         await rec._handle_success(make(120, 30, title="Drifting", artist="A"))
-        assert rec.retiming is False            # retime complete
+        assert rec.retiming is True             # still re-timing (only 'initial')
         assert rec._current.title == held.title  # same track kept
-        assert rec._current.offset == 120        # position re-acquired
+        assert rec._current.offset == 120        # position did move
+
+        # Consensus reads on the new timeline re-lock -> retime complete.
+        for off, cs in [(125, 35), (130, 40), (135, 45)]:
+            await rec._handle_success(make(off, cs, title="Drifting", artist="A"))
+        assert rec._lock.locked is True
+        assert rec.retiming is False
 
     asyncio.run(scenario())
 
